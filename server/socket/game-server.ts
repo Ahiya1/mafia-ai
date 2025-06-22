@@ -13,8 +13,8 @@ import {
   PlayerId,
   GameConfig,
   PlayerRole,
-} from "../types/game";
-import { AI_PERSONALITIES, AIModel } from "../types/ai";
+} from "../lib/types/game";
+import { AI_PERSONALITIES, AIModel } from "../lib/types/ai";
 import { v4 as uuidv4 } from "uuid";
 
 export class GameSocketServer {
@@ -340,27 +340,27 @@ export class GameSocketServer {
   private setupGameEngineHandlers(room: GameRoom): void {
     const engine = room.gameEngine!;
 
-    engine.on("game_event", (event) => {
+    engine.on("game_event", (event: any) => {
       this.broadcastToRoom(room.id, "game_event", event);
     });
 
-    engine.on("phase_changed", (data) => {
+    engine.on("phase_changed", (data: { newPhase: string }) => {
       this.broadcastToRoom(room.id, "phase_changed", data);
 
       // Trigger AI actions for new phase
       this.handleAIPhaseTransition(room, data.newPhase);
     });
 
-    engine.on("player_eliminated", (data) => {
+    engine.on("player_eliminated", (data: any) => {
       this.broadcastToRoom(room.id, "player_eliminated", data);
     });
 
-    engine.on("game_ended", (data) => {
+    engine.on("game_ended", (data: any) => {
       this.broadcastToRoom(room.id, "game_ended", data);
       this.cleanupGame(room);
     });
 
-    engine.on("speaker_turn_started", (data) => {
+    engine.on("speaker_turn_started", (data: { speakerId: any }) => {
       this.broadcastToRoom(room.id, "speaker_turn_started", data);
 
       // If it's an AI player's turn, generate their response
@@ -370,7 +370,7 @@ export class GameSocketServer {
       }
     });
 
-    engine.on("next_voter", (data) => {
+    engine.on("next_voter", (data: { voterId: any }) => {
       this.broadcastToRoom(room.id, "next_voter", data);
 
       // If it's an AI player's turn to vote
@@ -570,7 +570,10 @@ export class GameSocketServer {
       round: gameState.currentRound,
       gameHistory: gameState.messages
         .slice(-10)
-        .map((m) => `${room.players.get(m.playerId)?.name}: ${m.content}`),
+        .map(
+          (m: { playerId: any; content: any }) =>
+            `${room.players.get(m.playerId)?.name}: ${m.content}`
+        ),
       livingPlayers: Array.from(room.players.values())
         .filter((p) => p.isAlive)
         .map((p) => p.id),

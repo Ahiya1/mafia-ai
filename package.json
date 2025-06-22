@@ -7,13 +7,14 @@
     "dev": "concurrently \"npm run dev:next\" \"npm run dev:server\"",
     "dev:next": "next dev --turbo",
     "dev:server": "tsx watch server/index.ts",
+    "server:dev": "tsx watch server/index.ts",
     "build": "next build && npm run build:server",
     "build:server": "tsc --project tsconfig.server.json",
     "start": "next start",
     "start:server": "node dist/server/index.js",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "test:server": "node test-server.js",
+    "test:server": "chmod +x test-server.sh && ./test-server.sh",
     "setup": "npm install && npm run type-check"
   },
   "dependencies": {

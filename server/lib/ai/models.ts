@@ -242,7 +242,7 @@ ${context.gameHistory.slice(-5).join("\n")}`;
     if (context.previousVotes.length > 0) {
       prompt += `\n\nPREVIOUS VOTING PATTERNS:
 ${context.previousVotes
-  .map((v) => `Round ${v.round}: ${v.votes.length} votes cast`)
+  .map((v: any) => `Round ${v.round}: ${v.votes.length} votes cast`)
   .join("\n")}`;
     }
 
@@ -454,7 +454,8 @@ Who do you want to protect? Format: "I want to protect [PLAYER_NAME] tonight"`;
     };
 
     const messages =
-      fallbackMessages[request.type] || fallbackMessages.discussion;
+      fallbackMessages[request.type as keyof typeof fallbackMessages] ||
+      fallbackMessages.discussion;
     const content = messages[Math.floor(Math.random() * messages.length)];
 
     return {
