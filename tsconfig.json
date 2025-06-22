@@ -47,6 +47,11 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
 
+    // Module resolution fixes
+    "moduleDetection": "auto",
+    "allowImportingTsExtensions": false,
+    "noResolve": false,
+
     // Next.js specific
     "plugins": [
       {
@@ -63,7 +68,16 @@
     "server/**/*.ts"
   ],
 
-  "exclude": ["node_modules", ".next", "out", "dist", "build"],
+  "exclude": [
+    "node_modules",
+    ".next",
+    "out",
+    "dist",
+    "build",
+    "test-server.js",
+    "websocket_test.js",
+    "ai_test.js"
+  ],
 
   "ts-node": {
     "esm": true,

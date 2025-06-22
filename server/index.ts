@@ -103,6 +103,8 @@ app.post("/api/creator/ai-only-game", (req: Request, res: Response) => {
       error: error instanceof Error ? error.message : "Unknown error",
     });
   }
+  // FIXED: Added return statement to ensure all code paths return
+  return;
 });
 
 // Get personality pool information
