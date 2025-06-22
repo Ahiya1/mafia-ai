@@ -101,3 +101,5 @@ test-server.js
 setup-phase1.sh
 
 package-lock.json
+
+tsconfig.tsbuildinfo
