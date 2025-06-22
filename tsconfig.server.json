@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "outDir": "./dist",
+    "rootDir": ".",
+    "declaration": false,
+    "removeComments": true,
+    "noEmit": false,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "types": ["node", "express"]
+  },
+  "include": ["server/**/*.ts", "src/types/**/*.ts", "src/lib/**/*.ts"],
+  "exclude": ["node_modules", "dist", ".next", "src/app", "src/components"]
+}
