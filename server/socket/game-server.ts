@@ -1,8 +1,8 @@
 // WebSocket Game Server for AI Mafia - Real-time Multiplayer Coordination
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
-import { MafiaGameEngine } from "@/lib/game/engine";
-import { AIModelManager } from "@/lib/ai/models";
+import { MafiaGameEngine } from "../lib/game/engine";
+import { AIModelManager } from "../lib/ai/models";
 import {
   GameAction,
   GameResponse,
@@ -13,8 +13,8 @@ import {
   PlayerId,
   GameConfig,
   PlayerRole,
-} from "@/types/game";
-import { AI_PERSONALITIES, AIModel } from "@/types/ai";
+} from "../types/game";
+import { AI_PERSONALITIES, AIModel } from "../types/ai";
 import { v4 as uuidv4 } from "uuid";
 
 export class GameSocketServer {
@@ -223,20 +223,31 @@ export class GameSocketServer {
     );
     const aiPlayersNeeded = room.config.maxPlayers - currentPlayerCount;
 
+    if (aiPlayersNeeded <= 0) return;
+
     const availableModels = room.config.premiumModelsEnabled
       ? Object.values(AIModel)
       : [AIModel.CLAUDE_HAIKU, AIModel.GPT_4O_MINI, AIModel.GEMINI_2_5_FLASH];
 
-    for (let i = 0; i < aiPlayersNeeded; i++) {
-      const modelIndex = i % availableModels.length;
-      const model = availableModels[modelIndex];
-      const personality = AI_PERSONALITIES[model];
+    // Get personality pool to ensure variety
+    const personalityPool = this.getPersonalityPool();
+    const usedNames = Array.from(room.players.values()).map((p) => p.name);
+    const availablePersonalities = personalityPool.filter(
+      (p) => !usedNames.includes(p.name)
+    );
+
+    for (
+      let i = 0;
+      i < aiPlayersNeeded && i < availablePersonalities.length;
+      i++
+    ) {
+      const personality = availablePersonalities[i];
 
       const aiPlayer: Player = {
         id: uuidv4(),
         name: personality.name,
         type: PlayerType.AI,
-        model,
+        model: personality.model,
         isAlive: true,
         isReady: true, // AI players are always ready
         lastActive: new Date(),
@@ -257,7 +268,7 @@ export class GameSocketServer {
 
     // Update room config
     room.config.humanCount = humanPlayers.length;
-    room.config.aiCount = aiPlayersNeeded;
+    room.config.aiCount = room.players.size - humanPlayers.length;
 
     this.broadcastToRoom(room.id, "room_updated", {
       players: Array.from(room.players.values()),
@@ -716,7 +727,47 @@ export class GameSocketServer {
     };
   }
 
-  // Public API
+  // Personality Pool Management
+  private getPersonalityPool(): Array<{ name: string; model: AIModel }> {
+    // Extended personality pool with 25+ human names
+    const personalityPool = [
+      // Premium Models
+      { name: "Detective Chen", model: AIModel.CLAUDE_SONNET_4 },
+      { name: "Riley the Storyteller", model: AIModel.GPT_4O },
+      { name: "Alex Sharp", model: AIModel.GEMINI_2_5_PRO },
+
+      // Free Models
+      { name: "Sam Logic", model: AIModel.CLAUDE_HAIKU },
+      { name: "Jordan Quick", model: AIModel.GPT_4O_MINI },
+      { name: "Casey Direct", model: AIModel.GEMINI_2_5_FLASH },
+
+      // Additional personalities for variety
+      { name: "Morgan Wells", model: AIModel.CLAUDE_SONNET_4 },
+      { name: "Taylor Cross", model: AIModel.GPT_4O },
+      { name: "Jamie Fox", model: AIModel.GEMINI_2_5_PRO },
+      { name: "Blake Rivers", model: AIModel.CLAUDE_HAIKU },
+      { name: "Avery Stone", model: AIModel.GPT_4O_MINI },
+      { name: "Drew Harper", model: AIModel.GEMINI_2_5_FLASH },
+      { name: "Sage Miller", model: AIModel.CLAUDE_SONNET_4 },
+      { name: "Quinn Adams", model: AIModel.GPT_4O },
+      { name: "Rowan Clarke", model: AIModel.GEMINI_2_5_PRO },
+      { name: "Phoenix Gray", model: AIModel.CLAUDE_HAIKU },
+      { name: "River Chen", model: AIModel.GPT_4O_MINI },
+      { name: "Lane Foster", model: AIModel.GEMINI_2_5_FLASH },
+      { name: "Dakota Mills", model: AIModel.CLAUDE_SONNET_4 },
+      { name: "Emery Brooks", model: AIModel.GPT_4O },
+      { name: "Sky Martinez", model: AIModel.GEMINI_2_5_PRO },
+      { name: "Sage Thompson", model: AIModel.CLAUDE_HAIKU },
+      { name: "Nova Reed", model: AIModel.GPT_4O_MINI },
+      { name: "Cedar Walsh", model: AIModel.GEMINI_2_5_FLASH },
+      { name: "Storm Knight", model: AIModel.CLAUDE_SONNET_4 },
+    ];
+
+    // Shuffle for variety
+    return personalityPool.sort(() => Math.random() - 0.5);
+  }
+
+  // Public API Methods
   getRoomStats(): any {
     return {
       totalRooms: this.rooms.size,
@@ -731,6 +782,72 @@ export class GameSocketServer {
 
   getAIUsageStats(): any {
     return this.aiManager.getUsageStats();
+  }
+
+  getPersonalityPoolInfo(): any {
+    const personalityPool = this.getPersonalityPool();
+    return {
+      totalPersonalities: personalityPool.length,
+      personalities: personalityPool.map((p) => ({
+        name: p.name,
+        model: p.model,
+        archetype: AI_PERSONALITIES[p.model].archetype,
+        description: AI_PERSONALITIES[p.model].description,
+      })),
+      modelDistribution: Object.values(AIModel).map((model) => ({
+        model,
+        count: personalityPool.filter((p) => p.model === model).length,
+      })),
+    };
+  }
+
+  createAIOnlyGame(gameConfig?: any): any {
+    const roomId = uuidv4();
+    const roomCode = this.generateRoomCode();
+
+    const config: GameConfig = {
+      maxPlayers: 10,
+      aiCount: 10,
+      humanCount: 0,
+      nightPhaseDuration: 90,
+      discussionPhaseDuration: 300,
+      votingPhaseDuration: 120,
+      revelationPhaseDuration: 10,
+      speakingTimePerPlayer: 35,
+      allowSpectators: true,
+      premiumModelsEnabled: true, // Creator gets premium
+      ...gameConfig,
+    };
+
+    const room: GameRoom = {
+      id: roomId,
+      code: roomCode,
+      hostId: "creator", // Special creator host
+      players: new Map(),
+      config,
+      createdAt: new Date(),
+      gameEngine: null,
+    };
+
+    this.rooms.set(roomId, room);
+
+    // Fill with AI players only
+    this.fillWithAIPlayers(room);
+
+    // Auto-start the game
+    setTimeout(() => {
+      room.gameEngine = new MafiaGameEngine(room.id, room.config);
+      this.setupGameEngineHandlers(room);
+
+      Array.from(room.players.values()).forEach((player) => {
+        room.gameEngine!.addPlayer(player);
+      });
+
+      room.gameEngine.startGame();
+      this.startAIAutomation(room);
+    }, 2000);
+
+    return this.getRoomInfo(room);
   }
 }
 

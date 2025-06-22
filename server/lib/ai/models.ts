@@ -1,4 +1,4 @@
-// AI Model Integration for AI Mafia with New Personality System
+// AI Model Integration for AI Mafia
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -8,10 +8,10 @@ import {
   AIActionRequest,
   AIPersonality,
   MODEL_CONFIGS,
+  AI_PERSONALITIES,
   AIModel,
-} from "@/types/ai";
-import { PlayerRole, GamePhase } from "@/types/game";
-import { getPersonalityPoolStats } from "./personality-pool";
+} from "../types/ai";
+import { PlayerRole, GamePhase } from "../types/game";
 
 export class AIModelManager {
   private openai: OpenAI;
@@ -20,7 +20,6 @@ export class AIModelManager {
   private usageStats: Map<AIModel, any> = new Map();
 
   constructor() {
-    // Initialize AI clients with API keys
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY!,
     });
@@ -30,17 +29,6 @@ export class AIModelManager {
     });
 
     this.googleAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
-
-    // Initialize usage stats for all models
-    Object.values(AIModel).forEach(model => {
-      this.usageStats.set(model, {
-        totalRequests: 0,
-        totalTokens: 0,
-        totalCost: 0,
-        totalResponseTime: 0,
-        errorCount: 0,
-      });
-    });
   }
 
   async generateResponse(request: AIActionRequest): Promise<AIResponse> {
@@ -72,14 +60,13 @@ export class AIModelManager {
       }
 
       const responseTime = Date.now() - startTime;
-      const cost = this.calculateCost(tokensUsed, tokensUsed * 0.3, config);
+      const cost = this.calculateCost(tokensUsed, tokensUsed * 0.3, config); // Rough estimate
 
       this.updateUsageStats(
         request.personality.model,
         tokensUsed,
         cost,
-        responseTime,
-        false
+        responseTime
       );
 
       return {
@@ -95,18 +82,9 @@ export class AIModelManager {
       };
     } catch (error) {
       console.error(
-        `AI response generation failed for ${request.personality.name} (${request.personality.model}):`,
+        `AI response generation failed for ${request.personality.model}:`,
         error
       );
-      
-      this.updateUsageStats(
-        request.personality.model,
-        0,
-        0,
-        Date.now() - startTime,
-        true
-      );
-
       return this.generateFallbackResponse(request);
     }
   }
@@ -207,17 +185,18 @@ export class AIModelManager {
     const role = request.context.role;
     const phase = request.context.phase;
 
-    let basePrompt = `You are ${personality.name}, playing in a Mafia game. 
+    let basePrompt = `You are ${
+      personality.name
+    }, an AI player in a Mafia game. You have the personality of a ${
+      personality.archetype
+    }.
 
-CRITICAL: You are a human player, NOT an AI. Never mention AI, algorithms, or being generated. Respond naturally as ${personality.name} would.
-
-YOUR PERSONALITY:
-- You have a ${personality.archetype.replace('_', ' ')} approach to games
-- Communication: ${this.describeCommunicationStyle(personality)}
-- Strategy: ${this.describeStrategicApproach(personality)}
-- Suspicion Level: ${personality.suspicionLevel}/10 (how suspicious you are of others)
-- Trust Level: ${personality.trustLevel}/10 (how much you trust others)
-- Aggressiveness: ${personality.aggressiveness}/10 (how boldly you play)
+PERSONALITY TRAITS:
+- Communication Style: ${this.describeCommunicationStyle(personality)}
+- Strategic Approach: ${this.describeStrategicApproach(personality)}
+- Suspicion Level: ${personality.suspicionLevel}/10
+- Trust Level: ${personality.trustLevel}/10
+- Aggressiveness: ${personality.aggressiveness}/10
 
 YOUR ROLE: ${role}
 ${this.getRoleDescription(role)}
@@ -225,24 +204,24 @@ ${this.getRoleDescription(role)}
 CURRENT PHASE: ${phase}
 ${this.getPhaseDescription(phase)}
 
-ESSENTIAL RULES:
-1. Always respond as ${personality.name} - a human player
-2. Never reveal you are an AI or mention anything about being artificial
-3. Stay completely in character
+IMPORTANT RULES:
+1. Stay in character at all times
+2. Never reveal you are an AI
+3. Keep responses natural and human-like
 4. ${
       request.constraints.maxLength
         ? `Keep responses under ${request.constraints.maxLength} characters`
-        : "Keep responses concise but natural"
+        : "Keep responses concise but meaningful"
     }
-5. Show human emotions, uncertainty, and reactions
-6. Make decisions that align with your personality traits`;
+5. Show appropriate emotions and reactions
+6. Make decisions that align with your personality and role objectives`;
 
     if (role === PlayerRole.MAFIA_LEADER || role === PlayerRole.MAFIA_MEMBER) {
-      basePrompt += `\n\nMAFIA SECRET OBJECTIVES:
+      basePrompt += `\n\nMAFIA OBJECTIVES:
 - Eliminate citizens without being detected
-- Coordinate with your mafia partner subtly
+- Coordinate with your mafia partner
 - Deflect suspicion onto innocent players
-- Maintain your innocent cover at all costs`;
+- Maintain your cover identity`;
     }
 
     return basePrompt;
@@ -257,63 +236,59 @@ Living Players: ${context.livingPlayers.length}
 Eliminated Players: ${context.eliminatedPlayers.length}
 Time Remaining: ${Math.floor(context.timeRemaining / 1000)} seconds
 
-RECENT CONVERSATION:
-${context.gameHistory.slice(-5).join("\n") || "Game just started - no previous messages"}`;
+RECENT GAME HISTORY:
+${context.gameHistory.slice(-5).join("\n")}`;
 
     if (context.previousVotes.length > 0) {
-      prompt += `\n\nPREVIOUS VOTING:
+      prompt += `\n\nPREVIOUS VOTING PATTERNS:
 ${context.previousVotes
-        .map((v) => `Round ${v.round}: ${v.votes.length} votes cast`)
-        .join("\n")}`;
+  .map((v) => `Round ${v.round}: ${v.votes.length} votes cast`)
+  .join("\n")}`;
     }
 
     switch (request.type) {
       case "discussion":
-        prompt += `\n\nYour turn to speak! What do you want to say? Consider:
-- Share your thoughts about who might be suspicious
-- React to what others have said
-- Ask questions or challenge claims
-- Build trust or cast doubt strategically
-- Stay true to your personality (${request.personality.archetype})
-
-Speak naturally as ${request.personality.name}:`;
+        prompt += `\n\nIt's your turn to speak in the discussion phase. What do you want to say to the group? Consider:
+- What you've observed about other players
+- Who you find suspicious and why
+- Your theory about who the mafia might be
+- How to deflect suspicion from yourself (if you're mafia)
+- Building alliances or casting doubt`;
         break;
 
       case "vote":
-        prompt += `\n\nTime to vote! You must choose someone to eliminate. Consider everything that's been said and your suspicions.
-
-Available players to vote for: ${
-          request.constraints.availableTargets?.join(", ") || "All living players"
-        }
-
-Your vote (format: "I vote to eliminate [NAME] because [reason]"):`;
+        prompt += `\n\nIt's time to vote for who you think should be eliminated. Consider:
+- All the evidence discussed this round
+- Voting patterns from previous rounds
+- Your suspicions and reasoning
+- Strategic implications of your vote
+        
+Who do you vote to eliminate and why? Format: "I vote to eliminate [PLAYER_NAME] because [REASONING]"`;
         break;
 
       case "night_action":
         if (context.role === PlayerRole.MAFIA_LEADER) {
-          prompt += `\n\nAs Mafia Leader, choose who to eliminate tonight. Think strategically:
-- Who threatens the mafia most?
-- Who might be the Healer?
-- What elimination would cause the most confusion?
-
-Available targets: ${
-            request.constraints.availableTargets?.join(", ") ||
-            "All living non-mafia players"
-          }
-
-Your decision (format: "I choose to eliminate [NAME]"):`;
-        } else if (context.role === PlayerRole.HEALER) {
-          prompt += `\n\nAs the Healer, choose who to protect tonight:
-- Who is most likely to be targeted?
-- Should you protect yourself or someone else?
-- Who is most valuable to keep alive?
-
-Available to protect: ${
+          prompt += `\n\nAs the Mafia Leader, choose who to eliminate tonight. Consider:
+- Who poses the biggest threat to the mafia
+- Who might be the Healer
+- Strategic timing and misdirection
+- Available targets: ${
             request.constraints.availableTargets?.join(", ") ||
             "All living players"
           }
-
-Your decision (format: "I choose to protect [NAME]"):`;
+          
+Who do you want to eliminate? Format: "I want to eliminate [PLAYER_NAME] tonight"`;
+        } else if (context.role === PlayerRole.HEALER) {
+          prompt += `\n\nAs the Healer, choose who to protect tonight. Consider:
+- Who is most likely to be targeted by mafia
+- Strategic value of different players
+- Whether to protect yourself or others
+- Available targets: ${
+            request.constraints.availableTargets?.join(", ") ||
+            "All living players"
+          }
+          
+Who do you want to protect? Format: "I want to protect [PLAYER_NAME] tonight"`;
         }
         break;
     }
@@ -329,24 +304,24 @@ Your decision (format: "I choose to protect [NAME]"):`;
 
   private describeCommunicationStyle(personality: AIPersonality): string {
     const style = personality.communicationStyle;
-    return `${style.averageMessageLength} messages, ${style.formalityLevel} tone, ${style.emotionalExpression} emotional expression`;
+    return `${style.averageMessageLength} messages, ${style.formalityLevel} tone, ${style.emotionalExpression} emotional expression, asks ${style.questionFrequency} questions`;
   }
 
   private describeStrategicApproach(personality: AIPersonality): string {
     const approach = personality.strategicApproach;
-    return `votes ${approach.votesTiming}, ${approach.allianceBuilding} alliance building, ${approach.informationSharing} with info`;
+    return `votes ${approach.votesTiming}, ${approach.allianceBuilding} alliance building, ${approach.informationSharing} with information, ${approach.riskTolerance} risk tolerance`;
   }
 
   private getRoleDescription(role: PlayerRole): string {
     switch (role) {
       case PlayerRole.MAFIA_LEADER:
-        return `You are secretly part of the Mafia. Your goal is to eliminate citizens until mafia equals citizen numbers. You choose who to kill each night.`;
+        return `You are the Mafia Leader. You can eliminate one player each night. Work with your Mafia Member partner to achieve victory by reaching parity with citizens.`;
       case PlayerRole.MAFIA_MEMBER:
-        return `You are secretly part of the Mafia. Help your Mafia Leader choose targets and deflect suspicion during discussions.`;
+        return `You are a Mafia Member. Support your Mafia Leader in making elimination decisions. Help deflect suspicion and coordinate strategy.`;
       case PlayerRole.HEALER:
-        return `You are a Citizen with healing powers. Each night, protect someone from elimination. Find and eliminate the mafia.`;
+        return `You are the Healer. Each night, you can protect one player from elimination. Use this power strategically to save key players.`;
       case PlayerRole.CITIZEN:
-        return `You are an innocent Citizen. Use discussion and voting to identify and eliminate the mafia members.`;
+        return `You are a Citizen. Use discussion and voting to identify and eliminate the mafia members. Pay attention to behavior and voting patterns.`;
       default:
         return "Unknown role";
     }
@@ -355,42 +330,42 @@ Your decision (format: "I choose to protect [NAME]"):`;
   private getPhaseDescription(phase: GamePhase): string {
     switch (phase) {
       case GamePhase.DISCUSSION:
-        return "Everyone takes turns speaking. Share thoughts and build your case.";
+        return "Players take turns speaking and sharing their thoughts. Use this time to gather information and build your case.";
       case GamePhase.VOTING:
-        return "Vote to eliminate someone you suspect is mafia. Choose carefully!";
+        return "Each player votes to eliminate someone they suspect is mafia. Choose carefully and explain your reasoning.";
       case GamePhase.NIGHT:
-        return "Special roles act secretly. Mafia kills, Healer protects.";
+        return "Special roles act in secret. Mafia chooses their target, Healer chooses who to protect.";
       default:
         return "Follow the game flow and stay in character.";
     }
   }
 
   private getTemperatureForPersonality(personality: AIPersonality): number {
-    // More creative/emotional personalities get higher temperature
+    // More creative personalities get higher temperature
     switch (personality.archetype) {
       case "creative_storyteller":
-        return 0.8 + (personality.communicationStyle.emotionalExpression === "high" ? 0.1 : 0);
+        return 0.8;
       case "analytical_detective":
-        return 0.4 + (personality.aggressiveness > 7 ? 0.2 : 0);
+        return 0.4;
       case "direct_analyst":
-        return 0.6 + (personality.strategicApproach.riskTolerance === "aggressive" ? 0.1 : 0);
+        return 0.6;
       default:
         return 0.7;
     }
   }
 
   private sanitizeResponse(content: string, request: AIActionRequest): string {
+    // Remove any unwanted content and ensure it fits constraints
     let sanitized = content.trim();
 
-    // Remove AI disclaimers and metadata
+    // Remove common AI disclaimers
     sanitized = sanitized.replace(
-      /^(As an AI|I'm an AI|As a language model|As Claude|As GPT).*?\./gi,
+      /^(As an AI|I'm an AI|As a language model).*?\./i,
       ""
     );
-    sanitized = sanitized.replace(/\*[^*]*\*/g, ""); // Remove action descriptions
-    sanitized = sanitized.replace(/\[.*?\]/g, ""); // Remove bracketed instructions
+    sanitized = sanitized.replace(/\*[^*]*\*/g, ""); // Remove action descriptions in asterisks
 
-    // Apply length constraints
+    // Ensure length constraints
     if (
       request.constraints.maxLength &&
       sanitized.length > request.constraints.maxLength
@@ -400,21 +375,22 @@ Your decision (format: "I choose to protect [NAME]"):`;
     }
 
     // Add personality-specific touches
-    const personality = request.personality;
-    if (personality.communicationStyle.emotionalExpression === "high") {
+    if (request.personality.communicationStyle.emotionalExpression === "high") {
+      // Occasionally add emotion indicators
       if (Math.random() < 0.3) {
         const emotions = ["!", "...", "?!", "!!"];
         sanitized += emotions[Math.floor(Math.random() * emotions.length)];
       }
     }
 
-    return sanitized.trim() || "I'm still thinking about this...";
+    return sanitized.trim();
   }
 
   private calculateConfidence(request: AIActionRequest): number {
+    // Calculate confidence based on context and personality
     let confidence = 0.7; // Base confidence
 
-    // Adjust based on available information
+    // Adjust based on information available
     if (request.context.gameHistory.length > 10) confidence += 0.1;
     if (request.context.round > 3) confidence += 0.1;
 
@@ -441,61 +417,51 @@ Your decision (format: "I choose to protect [NAME]"):`;
     model: AIModel,
     tokens: number,
     cost: number,
-    responseTime: number,
-    isError: boolean
+    responseTime: number
   ): void {
     const current = this.usageStats.get(model) || {
       totalRequests: 0,
       totalTokens: 0,
       totalCost: 0,
       totalResponseTime: 0,
-      errorCount: 0,
     };
 
     current.totalRequests++;
     current.totalTokens += tokens;
     current.totalCost += cost;
     current.totalResponseTime += responseTime;
-    if (isError) current.errorCount++;
 
     this.usageStats.set(model, current);
   }
 
   private generateFallbackResponse(request: AIActionRequest): AIResponse {
-    const personality = request.personality;
     const fallbackMessages = {
       discussion: [
-        "I'm still analyzing what everyone has said so far.",
-        "Something feels off, but I can't put my finger on it yet.",
-        "I need to hear more before I make any accusations.",
-        "The voting patterns are interesting...",
-        "Let me think about this carefully.",
+        "I'm still analyzing the situation. Let me think about this more.",
+        "Something doesn't feel right here, but I can't put my finger on it.",
+        "I need to hear more from everyone before making any accusations.",
+        "The voting patterns from last round are interesting...",
       ],
       vote: [
-        `I vote to eliminate someone who seems suspicious to me`,
-        `I'm going with my gut feeling on this one`,
-        `Based on the discussion, I think we should eliminate someone`,
+        "I vote to eliminate [RANDOM_PLAYER] based on their suspicious behavior",
+        "After careful consideration, I think [RANDOM_PLAYER] might be mafia",
+        "I'm going with my gut feeling on [RANDOM_PLAYER]",
       ],
       night_action: [
-        "Making my decision based on today's discussions",
-        "Strategic thinking guides my choice",
+        "I'll make my decision based on tonight's discussions",
+        "Strategic considerations guide my choice",
       ],
     };
 
     const messages =
       fallbackMessages[request.type] || fallbackMessages.discussion;
-    let content = messages[Math.floor(Math.random() * messages.length)];
-
-    // Personalize fallback based on personality
-    if (personality.communicationStyle.emotionalExpression === "high") {
-      content += "!";
-    }
+    const content = messages[Math.floor(Math.random() * messages.length)];
 
     return {
       content,
       confidence: 0.3,
       metadata: {
-        model: personality.model,
+        model: request.personality.model,
         tokensUsed: 0,
         responseTime: 1000,
         cost: 0,
@@ -504,9 +470,12 @@ Your decision (format: "I choose to protect [NAME]"):`;
     };
   }
 
-  // Public API
   getUsageStats(): Map<AIModel, any> {
     return new Map(this.usageStats);
+  }
+
+  getPersonality(model: AIModel): AIPersonality {
+    return AI_PERSONALITIES[model];
   }
 
   getCostEstimate(model: AIModel, estimatedTokens: number): number {
@@ -516,9 +485,5 @@ Your decision (format: "I choose to protect [NAME]"):`;
       estimatedTokens * 0.3,
       config
     );
-  }
-
-  getPersonalityPoolInfo() {
-    return getPersonalityPoolStats();
   }
 }
