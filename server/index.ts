@@ -13,9 +13,18 @@ const httpServer = createServer(app);
 const PORT = process.env.PORT || 3001;
 
 // Middleware
+// Update server/index.ts CORS configuration
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: [
+      process.env.FRONTEND_URL || "http://localhost:3000",
+      "http://localhost:3001",
+      "http://127.0.0.1:3001",
+      "http://localhost:8080", // For debugger
+      "http://127.0.0.1:8080", // For debugger (your current setup)
+      "http://localhost:8000", // Common alternative
+      "null", // For file:// protocol
+    ],
     credentials: true,
   })
 );
