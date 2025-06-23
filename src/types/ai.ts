@@ -65,6 +65,32 @@ export interface AIResponse {
   };
 }
 
+// Player status for AI context
+export interface PlayerStatus {
+  living: Array<{
+    id: PlayerId;
+    name: string;
+    role?: PlayerRole;
+  }>;
+  eliminated: Array<{
+    id: PlayerId;
+    name: string;
+    role: PlayerRole;
+  }>;
+}
+
+// Elimination event details
+export interface EliminationEvent {
+  round: number;
+  playerName: string;
+  playerId: PlayerId;
+  role: PlayerRole;
+  cause: "voted_out" | "mafia_kill";
+  voteCount?: number;
+  timestamp: Date;
+}
+
+// Enhanced AI Decision Context with all required properties
 export interface AIDecisionContext {
   playerId: PlayerId;
   role: PlayerRole;
@@ -77,6 +103,11 @@ export interface AIDecisionContext {
   timeRemaining: number;
   suspicionLevels: Record<PlayerId, number>;
   trustLevels: Record<PlayerId, number>;
+
+  // Additional properties for enhanced AI decision making
+  playerStatus?: PlayerStatus;
+  latestElimination?: EliminationEvent;
+  eliminationHistory?: EliminationEvent[];
 }
 
 export interface AIActionRequest {

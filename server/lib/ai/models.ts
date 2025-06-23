@@ -7,8 +7,9 @@ import {
   AIActionRequest,
   AIPersonality,
   MODEL_CONFIGS,
-  AI_PERSONALITIES,
   AIModel,
+  PlayerStatus,
+  EliminationEvent,
 } from "../types/ai";
 import { PlayerRole, GamePhase } from "../types/game";
 
@@ -241,11 +242,13 @@ ${this.getPhaseDescription(phase)}
     // 🆕 Add current player status awareness
     if (request.context.playerStatus) {
       basePrompt += `\n\nCURRENT PLAYER STATUS:
-LIVING: ${request.context.playerStatus.living.map((p) => p.name).join(", ")}`;
+LIVING: ${request.context.playerStatus.living
+        .map((p: any) => p.name)
+        .join(", ")}`;
 
       if (request.context.playerStatus.eliminated.length > 0) {
         basePrompt += `\nELIMINATED: ${request.context.playerStatus.eliminated
-          .map((p) => `${p.name} (${p.role})`)
+          .map((p: any) => `${p.name} (${p.role})`)
           .join(", ")}`;
       }
     }
@@ -276,7 +279,7 @@ ${elim.playerName} was just eliminated and revealed as ${elim.role}!`;
       // Warn if mafia partner is dead
       if (
         request.context.playerStatus?.eliminated.some(
-          (p) =>
+          (p: any) =>
             p.role === PlayerRole.MAFIA_LEADER ||
             p.role === PlayerRole.MAFIA_MEMBER
         )
@@ -304,12 +307,12 @@ Time Remaining: ${Math.floor(context.timeRemaining / 1000)} seconds
     // Show current living and dead players with roles
     if (context.playerStatus) {
       prompt += `\nLIVING: ${context.playerStatus.living
-        .map((p) => p.name)
+        .map((p: any) => p.name)
         .join(", ")}`;
 
       if (context.playerStatus.eliminated.length > 0) {
         prompt += `\nELIMINATED: ${context.playerStatus.eliminated
-          .map((p) => `${p.name} (${p.role})`)
+          .map((p: any) => `${p.name} (${p.role})`)
           .join(", ")}`;
       }
     }
@@ -341,7 +344,7 @@ Time Remaining: ${Math.floor(context.timeRemaining / 1000)} seconds
     // 🆕 Full elimination history
     if (context.eliminationHistory && context.eliminationHistory.length > 0) {
       prompt += `\n\nELIMINATION SUMMARY:`;
-      context.eliminationHistory.forEach((elim) => {
+      context.eliminationHistory.forEach((elim: EliminationEvent) => {
         const method = elim.cause === "voted_out" ? "Voted Out" : "Mafia Kill";
         prompt += `\nRound ${elim.round}: ${elim.playerName} (${elim.role}) - ${method}`;
       });
@@ -402,7 +405,7 @@ Format: "I vote to eliminate [PLAYER_NAME] because [REASONING]"`;
 
           // Check if healer is dead
           const healerDead = context.playerStatus?.eliminated.some(
-            (p) => p.role === PlayerRole.HEALER
+            (p: any) => p.role === PlayerRole.HEALER
           );
           if (healerDead) {
             prompt += `\n✅ ADVANTAGE: The healer is dead - no protections possible!`;
@@ -621,10 +624,6 @@ Who do you want to protect? Format: "I want to protect [PLAYER_NAME] tonight"`;
 
   getUsageStats(): Map<AIModel, any> {
     return new Map(this.usageStats);
-  }
-
-  getPersonality(model: AIModel): AIPersonality {
-    return AI_PERSONALITIES[model];
   }
 
   getCostEstimate(model: AIModel, estimatedTokens: number): number {

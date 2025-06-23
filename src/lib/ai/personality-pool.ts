@@ -1,17 +1,73 @@
 // Massive AI Personality Pool with Perfect Human Disguise System
-import { AIPersonality, CommunicationStyle, StrategicApproach } from "@/types/ai";
+import {
+  AIPersonality,
+  CommunicationStyle,
+  StrategicApproach,
+} from "@/types/ai";
 import { AIModel } from "@/types/game";
 
 // Pool of 50+ human names for perfect anonymity
 export const HUMAN_NAMES = [
-  "Alex", "Blake", "Casey", "Drew", "Emery", "Finley", "Harper", "Indigo",
-  "Jordan", "Kai", "Lane", "Morgan", "Nova", "Orion", "Parker", "Quinn",
-  "Reese", "River", "Rowan", "Sage", "Skylar", "Taylor", "Val", "Winter",
-  "Azure", "Brook", "Cedar", "Echo", "Frost", "Gray", "Haven", "Iris",
-  "Jade", "Knox", "Lux", "Max", "Noel", "Ocean", "Path", "Ray",
-  "Rain", "Storm", "True", "Vale", "Wave", "Zion", "Ash", "Bay",
-  "Cam", "Dove", "Eden", "Fox", "Glen", "Hope", "June", "Kit",
-  "Lee", "Moon", "Pine", "Star"
+  "Alex",
+  "Blake",
+  "Casey",
+  "Drew",
+  "Emery",
+  "Finley",
+  "Harper",
+  "Indigo",
+  "Jordan",
+  "Kai",
+  "Lane",
+  "Morgan",
+  "Nova",
+  "Orion",
+  "Parker",
+  "Quinn",
+  "Reese",
+  "River",
+  "Rowan",
+  "Sage",
+  "Skylar",
+  "Taylor",
+  "Val",
+  "Winter",
+  "Azure",
+  "Brook",
+  "Cedar",
+  "Echo",
+  "Frost",
+  "Gray",
+  "Haven",
+  "Iris",
+  "Jade",
+  "Knox",
+  "Lux",
+  "Max",
+  "Noel",
+  "Ocean",
+  "Path",
+  "Ray",
+  "Rain",
+  "Storm",
+  "True",
+  "Vale",
+  "Wave",
+  "Zion",
+  "Ash",
+  "Bay",
+  "Cam",
+  "Dove",
+  "Eden",
+  "Fox",
+  "Glen",
+  "Hope",
+  "June",
+  "Kit",
+  "Lee",
+  "Moon",
+  "Pine",
+  "Star",
 ];
 
 // FREE TIER: 18 Personalities (3 per model × 6 models)
@@ -443,7 +499,7 @@ export const FREE_TIER_PERSONALITIES: AIPersonality[] = [
 export const PREMIUM_TIER_PERSONALITIES: AIPersonality[] = [
   // Include all free tier personalities first
   ...FREE_TIER_PERSONALITIES,
-  
+
   // Claude Sonnet 4 Personalities (5)
   {
     model: AIModel.CLAUDE_SONNET_4,
@@ -804,12 +860,14 @@ export function selectGamePersonalities(
   premiumModelsEnabled: boolean = false,
   count: number = 9
 ): AIPersonality[] {
-  const availablePersonalities = premiumModelsEnabled 
-    ? PREMIUM_TIER_PERSONALITIES 
+  const availablePersonalities = premiumModelsEnabled
+    ? PREMIUM_TIER_PERSONALITIES
     : FREE_TIER_PERSONALITIES;
 
   if (availablePersonalities.length < count) {
-    throw new Error(`Not enough personalities available. Need ${count}, have ${availablePersonalities.length}`);
+    throw new Error(
+      `Not enough personalities available. Need ${count}, have ${availablePersonalities.length}`
+    );
   }
 
   // Shuffle and select the required number
@@ -828,9 +886,11 @@ export function assignAnonymousNames(playerCount: number): string[] {
 /**
  * Gets a random human name that hasn't been used
  */
-export function generateRandomHumanName(usedNames: Set<string> = new Set()): string {
-  const availableNames = HUMAN_NAMES.filter(name => !usedNames.has(name));
-  
+export function generateRandomHumanName(
+  usedNames: Set<string> = new Set()
+): string {
+  const availableNames = HUMAN_NAMES.filter((name) => !usedNames.has(name));
+
   if (availableNames.length === 0) {
     // Fallback to random generation if all names used
     return `Player${Math.floor(Math.random() * 1000)}`;
@@ -847,26 +907,50 @@ export function getPersonalityPoolStats() {
     free: {
       total: FREE_TIER_PERSONALITIES.length,
       byModel: {
-        [AIModel.CLAUDE_HAIKU]: FREE_TIER_PERSONALITIES.filter(p => p.model === AIModel.CLAUDE_HAIKU).length,
-        [AIModel.GPT_4O_MINI]: FREE_TIER_PERSONALITIES.filter(p => p.model === AIModel.GPT_4O_MINI).length,
-        [AIModel.GEMINI_2_5_FLASH]: FREE_TIER_PERSONALITIES.filter(p => p.model === AIModel.GEMINI_2_5_FLASH).length,
+        [AIModel.CLAUDE_HAIKU]: FREE_TIER_PERSONALITIES.filter(
+          (p) => p.model === AIModel.CLAUDE_HAIKU
+        ).length,
+        [AIModel.GPT_4O_MINI]: FREE_TIER_PERSONALITIES.filter(
+          (p) => p.model === AIModel.GPT_4O_MINI
+        ).length,
+        [AIModel.GEMINI_2_5_FLASH]: FREE_TIER_PERSONALITIES.filter(
+          (p) => p.model === AIModel.GEMINI_2_5_FLASH
+        ).length,
       },
       byArchetype: {
-        analytical_detective: FREE_TIER_PERSONALITIES.filter(p => p.archetype === "analytical_detective").length,
-        creative_storyteller: FREE_TIER_PERSONALITIES.filter(p => p.archetype === "creative_storyteller").length,
-        direct_analyst: FREE_TIER_PERSONALITIES.filter(p => p.archetype === "direct_analyst").length,
-      }
+        analytical_detective: FREE_TIER_PERSONALITIES.filter(
+          (p) => p.archetype === "analytical_detective"
+        ).length,
+        creative_storyteller: FREE_TIER_PERSONALITIES.filter(
+          (p) => p.archetype === "creative_storyteller"
+        ).length,
+        direct_analyst: FREE_TIER_PERSONALITIES.filter(
+          (p) => p.archetype === "direct_analyst"
+        ).length,
+      },
     },
     premium: {
       total: PREMIUM_TIER_PERSONALITIES.length,
       byModel: {
-        [AIModel.CLAUDE_SONNET_4]: PREMIUM_TIER_PERSONALITIES.filter(p => p.model === AIModel.CLAUDE_SONNET_4).length,
-        [AIModel.GPT_4O]: PREMIUM_TIER_PERSONALITIES.filter(p => p.model === AIModel.GPT_4O).length,
-        [AIModel.GEMINI_2_5_PRO]: PREMIUM_TIER_PERSONALITIES.filter(p => p.model === AIModel.GEMINI_2_5_PRO).length,
-        [AIModel.CLAUDE_HAIKU]: PREMIUM_TIER_PERSONALITIES.filter(p => p.model === AIModel.CLAUDE_HAIKU).length,
-        [AIModel.GPT_4O_MINI]: PREMIUM_TIER_PERSONALITIES.filter(p => p.model === AIModel.GPT_4O_MINI).length,
-        [AIModel.GEMINI_2_5_FLASH]: PREMIUM_TIER_PERSONALITIES.filter(p => p.model === AIModel.GEMINI_2_5_FLASH).length,
-      }
-    }
+        [AIModel.CLAUDE_SONNET_4]: PREMIUM_TIER_PERSONALITIES.filter(
+          (p) => p.model === AIModel.CLAUDE_SONNET_4
+        ).length,
+        [AIModel.GPT_4O]: PREMIUM_TIER_PERSONALITIES.filter(
+          (p) => p.model === AIModel.GPT_4O
+        ).length,
+        [AIModel.GEMINI_2_5_PRO]: PREMIUM_TIER_PERSONALITIES.filter(
+          (p) => p.model === AIModel.GEMINI_2_5_PRO
+        ).length,
+        [AIModel.CLAUDE_HAIKU]: PREMIUM_TIER_PERSONALITIES.filter(
+          (p) => p.model === AIModel.CLAUDE_HAIKU
+        ).length,
+        [AIModel.GPT_4O_MINI]: PREMIUM_TIER_PERSONALITIES.filter(
+          (p) => p.model === AIModel.GPT_4O_MINI
+        ).length,
+        [AIModel.GEMINI_2_5_FLASH]: PREMIUM_TIER_PERSONALITIES.filter(
+          (p) => p.model === AIModel.GEMINI_2_5_FLASH
+        ).length,
+      },
+    },
   };
 }
