@@ -1,4 +1,4 @@
-// AI Model and Personality Types for AI Mafia
+// AI Model and Personality Types for AI Mafia - Complete Implementation
 import { PlayerId, PlayerRole, GamePhase, AIModel } from "./game";
 
 // Export AIModel enum from game types for use in other modules
@@ -133,15 +133,16 @@ export interface CostOptimizationConfig {
   rateLimitPerModel: number; // requests per minute
 }
 
-// Personality presets for different AI models
+// Complete AI Personality definitions for all 6 models
 export const AI_PERSONALITIES: Record<AIModel, AIPersonality> = {
+  // Premium Models
   [AIModel.CLAUDE_SONNET_4]: {
     model: AIModel.CLAUDE_SONNET_4,
     name: "Detective Chen",
     description: "Methodical analyst who builds logical cases step by step",
     archetype: "analytical_detective",
     communicationStyle: {
-      averageMessageLength: "medium",
+      averageMessageLength: "long",
       formalityLevel: "formal",
       emotionalExpression: "low",
       questionFrequency: "high",
@@ -154,10 +155,11 @@ export const AI_PERSONALITIES: Record<AIModel, AIPersonality> = {
       informationSharing: "selective",
       riskTolerance: "conservative",
     },
-    suspicionLevel: 7,
+    suspicionLevel: 8,
     trustLevel: 6,
     aggressiveness: 4,
   },
+
   [AIModel.GPT_4O]: {
     model: AIModel.GPT_4O,
     name: "Riley the Storyteller",
@@ -182,6 +184,7 @@ export const AI_PERSONALITIES: Record<AIModel, AIPersonality> = {
     trustLevel: 8,
     aggressiveness: 6,
   },
+
   [AIModel.GEMINI_2_5_PRO]: {
     model: AIModel.GEMINI_2_5_PRO,
     name: "Alex Sharp",
@@ -189,24 +192,25 @@ export const AI_PERSONALITIES: Record<AIModel, AIPersonality> = {
       "Direct analyst who cuts through noise with efficient observations",
     archetype: "direct_analyst",
     communicationStyle: {
-      averageMessageLength: "short",
+      averageMessageLength: "medium",
       formalityLevel: "mixed",
       emotionalExpression: "medium",
-      questionFrequency: "low",
+      questionFrequency: "medium",
       storytellingTendency: "low",
       logicalReasoning: "high",
     },
     strategicApproach: {
-      votesTiming: "early",
+      votesTiming: "varies",
       allianceBuilding: "opportunistic",
       informationSharing: "selective",
-      riskTolerance: "aggressive",
+      riskTolerance: "moderate",
     },
-    suspicionLevel: 8,
-    trustLevel: 5,
-    aggressiveness: 7,
+    suspicionLevel: 7,
+    trustLevel: 6,
+    aggressiveness: 6,
   },
-  // Free tier personalities (similar but simpler)
+
+  // Free Tier Models
   [AIModel.CLAUDE_HAIKU]: {
     model: AIModel.CLAUDE_HAIKU,
     name: "Sam Logic",
@@ -226,10 +230,11 @@ export const AI_PERSONALITIES: Record<AIModel, AIPersonality> = {
       informationSharing: "selective",
       riskTolerance: "conservative",
     },
-    suspicionLevel: 6,
+    suspicionLevel: 7,
     trustLevel: 6,
     aggressiveness: 3,
   },
+
   [AIModel.GPT_4O_MINI]: {
     model: AIModel.GPT_4O_MINI,
     name: "Jordan Quick",
@@ -253,6 +258,7 @@ export const AI_PERSONALITIES: Record<AIModel, AIPersonality> = {
     trustLevel: 7,
     aggressiveness: 5,
   },
+
   [AIModel.GEMINI_2_5_FLASH]: {
     model: AIModel.GEMINI_2_5_FLASH,
     name: "Casey Direct",
@@ -345,4 +351,76 @@ export const MODEL_CONFIGS: Record<AIModel, AIModelConfig> = {
     supportsStreaming: false,
     responseTimeTarget: 800,
   },
+};
+
+// Utility functions for AI personality management
+export function getPersonalityByModel(model: AIModel): AIPersonality {
+  return AI_PERSONALITIES[model];
+}
+
+export function getRandomPersonalityForTier(
+  premiumEnabled: boolean = false
+): AIPersonality {
+  const availableModels = premiumEnabled
+    ? Object.values(AIModel)
+    : [AIModel.CLAUDE_HAIKU, AIModel.GPT_4O_MINI, AIModel.GEMINI_2_5_FLASH];
+
+  const randomModel =
+    availableModels[Math.floor(Math.random() * availableModels.length)];
+  return AI_PERSONALITIES[randomModel];
+}
+
+export function getPersonalitiesByArchetype(
+  archetype: AIPersonality["archetype"]
+): AIPersonality[] {
+  return Object.values(AI_PERSONALITIES).filter(
+    (p) => p.archetype === archetype
+  );
+}
+
+export function getModelsByTier(tier: "free" | "premium"): AIModel[] {
+  return Object.values(AIModel).filter(
+    (model) => MODEL_CONFIGS[model].tier === tier
+  );
+}
+
+export function calculateEstimatedCost(
+  model: AIModel,
+  inputTokens: number,
+  outputTokens: number
+): number {
+  const config = MODEL_CONFIGS[model];
+  const inputCost = (inputTokens / 1000000) * config.costPerInputToken;
+  const outputCost = (outputTokens / 1000000) * config.costPerOutputToken;
+  return inputCost + outputCost;
+}
+
+// Default prompt templates for different game phases
+export const DEFAULT_PROMPT_TEMPLATES: Record<GamePhase, string> = {
+  [GamePhase.WAITING]: "The game is starting soon. Get ready to play!",
+  [GamePhase.ROLE_ASSIGNMENT]:
+    "You have been assigned your role. Remember your objectives.",
+  [GamePhase.NIGHT]:
+    "It's nighttime. Special roles can now take their actions.",
+  [GamePhase.REVELATION]: "The results of the night are being revealed.",
+  [GamePhase.DISCUSSION]:
+    "Time for discussion. Share your thoughts and suspicions.",
+  [GamePhase.VOTING]:
+    "Time to vote. Choose carefully who you think should be eliminated.",
+  [GamePhase.GAME_OVER]: "The game has ended. Thanks for playing!",
+};
+
+// Role-specific instruction templates
+export const ROLE_INSTRUCTIONS: Record<PlayerRole, string> = {
+  [PlayerRole.MAFIA_LEADER]:
+    "You are the Mafia Leader. Your goal is to eliminate citizens until mafia equals citizen numbers. During night phases, you choose who to eliminate. Work with your mafia partner and stay hidden during discussions.",
+
+  [PlayerRole.MAFIA_MEMBER]:
+    "You are a Mafia Member. Support your Mafia Leader and help choose targets. During discussions, deflect suspicion and help your team achieve victory.",
+
+  [PlayerRole.HEALER]:
+    "You are the Healer. Each night, you can protect one player from elimination. Use this power strategically to save important players and help the citizens win.",
+
+  [PlayerRole.CITIZEN]:
+    "You are a Citizen. Use discussion and voting to identify and eliminate the mafia members. Pay attention to behavior patterns and voting history.",
 };

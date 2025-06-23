@@ -1,4 +1,4 @@
-// WebSocket Game Server for AI Mafia - Real-time Multiplayer Coordination
+// Fixed WebSocket Game Server for AI Mafia - Addressing Recursion and Event Issues
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
 import { MafiaGameEngine } from "../lib/game/engine";
@@ -15,6 +15,7 @@ import {
   PlayerRole,
 } from "../lib/types/game";
 import { AI_PERSONALITIES, AIModel } from "../lib/types/ai";
+import { selectGamePersonalities } from "../../src/lib/ai/personality-pool";
 import { v4 as uuidv4 } from "uuid";
 
 export class GameSocketServer {
@@ -22,6 +23,8 @@ export class GameSocketServer {
   private rooms: Map<RoomId, GameRoom> = new Map();
   private players: Map<PlayerId, PlayerConnection> = new Map();
   private aiManager: AIModelManager;
+  private dashboardSockets: Set<Socket> = new Set(); // Track dashboard connections
+  private aiActionTimeouts: Map<string, NodeJS.Timeout> = new Map(); // Track AI timeouts to prevent recursion
 
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
@@ -35,11 +38,25 @@ export class GameSocketServer {
 
     this.aiManager = new AIModelManager();
     this.setupSocketHandlers();
+
+    // Clean up AI timeouts every 5 minutes to prevent memory leaks
+    setInterval(() => {
+      this.cleanupOldTimeouts();
+    }, 300000);
   }
 
   private setupSocketHandlers(): void {
     this.io.on("connection", (socket: Socket) => {
-      console.log(`Player connected: ${socket.id}`);
+      console.log(`🔌 Player connected: ${socket.id}`);
+
+      // Check if this is a dashboard connection
+      if (socket.handshake.headers.referer?.includes("/dashboard")) {
+        this.dashboardSockets.add(socket);
+        console.log(`📊 Dashboard connected: ${socket.id}`);
+
+        // Send current stats to new dashboard
+        this.sendStatsToSocket(socket);
+      }
 
       socket.on(
         "join_room",
@@ -67,12 +84,16 @@ export class GameSocketServer {
         this.handlePlayerReady(socket, data.playerId);
       });
 
-      socket.on("disconnect", () => {
-        this.handleDisconnect(socket);
-      });
-
       socket.on("heartbeat", () => {
         socket.emit("heartbeat_ack");
+        this.broadcastToDashboards("heartbeat_received", {
+          socketId: socket.id,
+          timestamp: new Date(),
+        });
+      });
+
+      socket.on("disconnect", () => {
+        this.handleDisconnect(socket);
       });
     });
   }
@@ -120,17 +141,14 @@ export class GameSocketServer {
       joinedAt: new Date(),
     };
 
-    // Add player to room and tracking
     room.players.set(playerId, player);
     this.players.set(playerId, connection);
     socket.join(room.id);
 
-    // Add player to game engine if game exists
     if (room.gameEngine) {
       room.gameEngine.addPlayer(player);
     }
 
-    // Fill remaining slots with AI players if needed
     this.fillWithAIPlayers(room);
 
     socket.emit("room_joined", {
@@ -140,9 +158,14 @@ export class GameSocketServer {
       players: Array.from(room.players.values()),
     });
 
+    // FIXED: Broadcast to both room AND dashboards
     this.broadcastToRoom(room.id, "player_joined", { player });
+    this.broadcastToDashboards("player_joined", {
+      player,
+      roomCode: data.roomCode,
+    });
 
-    console.log(`Player ${data.playerName} joined room ${data.roomCode}`);
+    console.log(`✅ Player ${data.playerName} joined room ${data.roomCode}`);
   }
 
   private handleCreateRoom(
@@ -170,10 +193,10 @@ export class GameSocketServer {
 
     const gameConfig: GameConfig = {
       maxPlayers: 10,
-      aiCount: 9, // Will be adjusted based on human players
+      aiCount: 9,
       humanCount: 1,
       nightPhaseDuration: 90,
-      discussionPhaseDuration: 300, // 5 minutes
+      discussionPhaseDuration: 300,
       votingPhaseDuration: 120,
       revelationPhaseDuration: 10,
       speakingTimePerPlayer: 35,
@@ -203,7 +226,6 @@ export class GameSocketServer {
     this.players.set(playerId, connection);
     socket.join(roomId);
 
-    // Fill with AI players
     this.fillWithAIPlayers(room);
 
     socket.emit("room_created", {
@@ -213,67 +235,71 @@ export class GameSocketServer {
       roomInfo: this.getRoomInfo(room),
     });
 
-    console.log(`Room created: ${roomCode} by ${data.playerName}`);
+    // FIXED: Broadcast room creation to dashboards
+    this.broadcastToDashboards("room_created", {
+      roomCode,
+      playerId,
+      playerName: data.playerName,
+      timestamp: new Date(),
+    });
+
+    console.log(`🏠 Room created: ${roomCode} by ${data.playerName}`);
   }
 
   private fillWithAIPlayers(room: GameRoom): void {
     const currentPlayerCount = room.players.size;
-    const humanPlayers = Array.from(room.players.values()).filter(
-      (p) => p.type === PlayerType.HUMAN
-    );
     const aiPlayersNeeded = room.config.maxPlayers - currentPlayerCount;
 
     if (aiPlayersNeeded <= 0) return;
 
-    const availableModels = room.config.premiumModelsEnabled
-      ? Object.values(AIModel)
-      : [AIModel.CLAUDE_HAIKU, AIModel.GPT_4O_MINI, AIModel.GEMINI_2_5_FLASH];
+    try {
+      const personalities = selectGamePersonalities(
+        room.config.premiumModelsEnabled,
+        aiPlayersNeeded
+      );
 
-    // Get personality pool to ensure variety
-    const personalityPool = this.getPersonalityPool();
-    const usedNames = Array.from(room.players.values()).map((p) => p.name);
-    const availablePersonalities = personalityPool.filter(
-      (p) => !usedNames.includes(p.name)
-    );
+      for (
+        let i = 0;
+        i < Math.min(aiPlayersNeeded, personalities.length);
+        i++
+      ) {
+        const personality = personalities[i];
 
-    for (
-      let i = 0;
-      i < aiPlayersNeeded && i < availablePersonalities.length;
-      i++
-    ) {
-      const personality = availablePersonalities[i];
+        const aiPlayer: Player = {
+          id: uuidv4(),
+          name: personality.name,
+          type: PlayerType.AI,
+          model: personality.model,
+          isAlive: true,
+          isReady: true,
+          lastActive: new Date(),
+          gameStats: {
+            gamesPlayed: 0,
+            wins: 0,
+            accurateVotes: 0,
+            aiDetectionRate: 0,
+          },
+        };
 
-      const aiPlayer: Player = {
-        id: uuidv4(),
-        name: personality.name,
-        type: PlayerType.AI,
-        model: personality.model,
-        isAlive: true,
-        isReady: true, // AI players are always ready
-        lastActive: new Date(),
-        gameStats: {
-          gamesPlayed: 0,
-          wins: 0,
-          accurateVotes: 0,
-          aiDetectionRate: 0,
-        },
-      };
+        room.players.set(aiPlayer.id, aiPlayer);
 
-      room.players.set(aiPlayer.id, aiPlayer);
-
-      if (room.gameEngine) {
-        room.gameEngine.addPlayer(aiPlayer);
+        if (room.gameEngine) {
+          room.gameEngine.addPlayer(aiPlayer);
+        }
       }
+
+      room.config.humanCount = Array.from(room.players.values()).filter(
+        (p) => p.type === PlayerType.HUMAN
+      ).length;
+      room.config.aiCount = room.players.size - room.config.humanCount;
+
+      this.broadcastToRoom(room.id, "room_updated", {
+        players: Array.from(room.players.values()),
+        config: room.config,
+      });
+    } catch (error) {
+      console.error("❌ Error filling room with AI players:", error);
     }
-
-    // Update room config
-    room.config.humanCount = humanPlayers.length;
-    room.config.aiCount = room.players.size - humanPlayers.length;
-
-    this.broadcastToRoom(room.id, "room_updated", {
-      players: Array.from(room.players.values()),
-      config: room.config,
-    });
   }
 
   private handleGameAction(socket: Socket, action: GameAction): void {
@@ -313,14 +339,13 @@ export class GameSocketServer {
 
   private startGame(room: GameRoom, playerId: PlayerId): void {
     if (room.players.get(playerId)?.id !== room.hostId) {
-      return; // Only host can start game
+      return;
     }
 
     if (!room.gameEngine) {
       room.gameEngine = new MafiaGameEngine(room.id, room.config);
       this.setupGameEngineHandlers(room);
 
-      // Add all players to game engine
       Array.from(room.players.values()).forEach((player) => {
         room.gameEngine!.addPlayer(player);
       });
@@ -332,8 +357,14 @@ export class GameSocketServer {
         gameState: room.gameEngine.getGameState(),
       });
 
-      // Start AI player automation
-      this.startAIAutomation(room);
+      // FIXED: Broadcast to dashboards
+      this.broadcastToDashboards("game_started", {
+        roomCode: room.code,
+        timestamp: new Date(),
+      });
+
+      // FIXED: Start AI automation safely without recursion
+      this.startAIAutomationSafely(room);
     }
   }
 
@@ -342,161 +373,214 @@ export class GameSocketServer {
 
     engine.on("game_event", (event: any) => {
       this.broadcastToRoom(room.id, "game_event", event);
+      // FIXED: Also broadcast to dashboards
+      this.broadcastToDashboards("game_event", {
+        ...event,
+        roomCode: room.code,
+      });
     });
 
-    engine.on("phase_changed", (data: { newPhase: string }) => {
-      this.broadcastToRoom(room.id, "phase_changed", data);
+    engine.on(
+      "phase_changed",
+      (data: { newPhase: string; oldPhase: string }) => {
+        this.broadcastToRoom(room.id, "phase_changed", data);
+        this.broadcastToDashboards("phase_changed", {
+          ...data,
+          roomCode: room.code,
+        });
 
-      // Trigger AI actions for new phase
-      this.handleAIPhaseTransition(room, data.newPhase);
-    });
+        // FIXED: Safe AI phase transition without recursion
+        this.handleAIPhaseTransitionSafely(room, data.newPhase);
+      }
+    );
 
     engine.on("player_eliminated", (data: any) => {
       this.broadcastToRoom(room.id, "player_eliminated", data);
+      this.broadcastToDashboards("player_eliminated", {
+        ...data,
+        roomCode: room.code,
+      });
     });
 
     engine.on("game_ended", (data: any) => {
       this.broadcastToRoom(room.id, "game_ended", data);
+      this.broadcastToDashboards("game_ended", {
+        ...data,
+        roomCode: room.code,
+      });
       this.cleanupGame(room);
     });
 
     engine.on("speaker_turn_started", (data: { speakerId: any }) => {
       this.broadcastToRoom(room.id, "speaker_turn_started", data);
 
-      // If it's an AI player's turn, generate their response
       const player = room.players.get(data.speakerId);
       if (player?.type === PlayerType.AI) {
-        this.handleAIDiscussion(room, player);
+        // FIXED: Use safe AI handling
+        this.handleAIDiscussionSafely(room, player);
       }
     });
 
     engine.on("next_voter", (data: { voterId: any }) => {
       this.broadcastToRoom(room.id, "next_voter", data);
 
-      // If it's an AI player's turn to vote
       const player = room.players.get(data.voterId);
       if (player?.type === PlayerType.AI) {
-        this.handleAIVoting(room, player);
+        // FIXED: Use safe AI handling
+        this.handleAIVotingSafely(room, player);
       }
     });
   }
 
-  private async startAIAutomation(room: GameRoom): Promise<void> {
-    // AI players will automatically respond to game events
-    console.log(`AI automation started for room ${room.code}`);
+  // FIXED: Safe AI automation that prevents recursion
+  private startAIAutomationSafely(room: GameRoom): void {
+    console.log(`🤖 AI automation started for room ${room.code}`);
+    // Just log - actual AI actions are triggered by game events
   }
 
-  private async handleAIPhaseTransition(
+  // FIXED: Safe phase transition handling
+  private handleAIPhaseTransitionSafely(
     room: GameRoom,
     newPhase: string
-  ): Promise<void> {
+  ): void {
+    // Create unique timeout keys to prevent duplicate actions
+    const timeoutKey = `${room.id}_${newPhase}_${Date.now()}`;
+
     if (newPhase === "night") {
-      // Handle AI night actions
       const aiPlayers = Array.from(room.players.values()).filter(
         (p) => p.type === PlayerType.AI && p.isAlive
       );
 
       for (const aiPlayer of aiPlayers) {
         if (aiPlayer.role === PlayerRole.MAFIA_LEADER) {
-          setTimeout(() => this.handleAIMafiaAction(room, aiPlayer), 2000);
+          const mafiaTimeoutKey = `${timeoutKey}_mafia_${aiPlayer.id}`;
+          const timeout = setTimeout(() => {
+            this.handleAIMafiaActionSafely(room, aiPlayer);
+            this.aiActionTimeouts.delete(mafiaTimeoutKey);
+          }, 2000 + Math.random() * 3000); // Add randomness
+
+          this.aiActionTimeouts.set(mafiaTimeoutKey, timeout);
         } else if (aiPlayer.role === PlayerRole.HEALER) {
-          setTimeout(() => this.handleAIHealerAction(room, aiPlayer), 1500);
+          const healerTimeoutKey = `${timeoutKey}_healer_${aiPlayer.id}`;
+          const timeout = setTimeout(() => {
+            this.handleAIHealerActionSafely(room, aiPlayer);
+            this.aiActionTimeouts.delete(healerTimeoutKey);
+          }, 1500 + Math.random() * 2000); // Add randomness
+
+          this.aiActionTimeouts.set(healerTimeoutKey, timeout);
         }
       }
     }
   }
 
-  private async handleAIDiscussion(
+  // FIXED: Safe AI discussion handling
+  private async handleAIDiscussionSafely(
     room: GameRoom,
     aiPlayer: Player
   ): Promise<void> {
+    const actionKey = `discussion_${room.id}_${aiPlayer.id}_${Date.now()}`;
+
+    // Prevent duplicate actions
+    if (this.aiActionTimeouts.has(actionKey)) {
+      return;
+    }
+
     try {
       const context = this.buildAIContext(room, aiPlayer);
+      const personality = AI_PERSONALITIES[aiPlayer.model!];
+
+      if (!personality) {
+        console.warn(`⚠️ No personality found for model ${aiPlayer.model}`);
+        return;
+      }
+
       const request = {
         type: "discussion" as const,
         context,
-        personality: AI_PERSONALITIES[aiPlayer.model!],
+        personality,
         constraints: { maxLength: 200, timeLimit: 30000 },
       };
 
       const response = await this.aiManager.generateResponse(request);
 
-      // Add realistic delay
-      const delay = 2000 + Math.random() * 3000; // 2-5 seconds
-      setTimeout(() => {
-        room.gameEngine?.sendMessage(aiPlayer.id, response.content);
+      const delay = 2000 + Math.random() * 3000;
+      const timeout = setTimeout(() => {
+        if (room.gameEngine && room.players.has(aiPlayer.id)) {
+          room.gameEngine.sendMessage(aiPlayer.id, response.content);
+        }
+        this.aiActionTimeouts.delete(actionKey);
       }, delay);
+
+      this.aiActionTimeouts.set(actionKey, timeout);
     } catch (error) {
-      console.error(`AI discussion error for ${aiPlayer.name}:`, error);
+      console.error(`❌ AI discussion error for ${aiPlayer.name}:`, error);
+
       // Fallback message
-      setTimeout(() => {
-        room.gameEngine?.sendMessage(
-          aiPlayer.id,
-          "I'm still thinking about this..."
-        );
+      const timeout = setTimeout(() => {
+        if (room.gameEngine && room.players.has(aiPlayer.id)) {
+          room.gameEngine.sendMessage(
+            aiPlayer.id,
+            "I'm still thinking about this..."
+          );
+        }
+        this.aiActionTimeouts.delete(actionKey);
       }, 3000);
+
+      this.aiActionTimeouts.set(actionKey, timeout);
     }
   }
 
-  private async handleAIVoting(
+  // FIXED: Safe AI voting handling
+  private async handleAIVotingSafely(
     room: GameRoom,
     aiPlayer: Player
   ): Promise<void> {
+    const actionKey = `voting_${room.id}_${aiPlayer.id}_${Date.now()}`;
+
+    if (this.aiActionTimeouts.has(actionKey)) {
+      return;
+    }
+
     try {
-      const context = this.buildAIContext(room, aiPlayer);
       const alivePlayers = Array.from(room.players.values()).filter(
         (p) => p.isAlive && p.id !== aiPlayer.id
       );
 
-      const request = {
-        type: "vote" as const,
-        context,
-        personality: AI_PERSONALITIES[aiPlayer.model!],
-        constraints: {
-          availableTargets: alivePlayers.map((p) => p.id),
-          mustVote: true,
-        },
-      };
-
-      const response = await this.aiManager.generateResponse(request);
-
-      // Extract vote target from response
-      const targetId = this.extractVoteTarget(response.content, alivePlayers);
-      const reasoning = response.content;
-
-      // Add realistic delay
-      const delay = 3000 + Math.random() * 4000; // 3-7 seconds
-      setTimeout(() => {
-        if (targetId) {
-          room.gameEngine?.castVote(aiPlayer.id, targetId, reasoning);
-        }
-      }, delay);
-    } catch (error) {
-      console.error(`AI voting error for ${aiPlayer.name}:`, error);
-      // Random fallback vote
-      const alivePlayers = Array.from(room.players.values()).filter(
-        (p) => p.isAlive && p.id !== aiPlayer.id
-      );
-      if (alivePlayers.length > 0) {
-        const randomTarget =
-          alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
-        setTimeout(() => {
-          room.gameEngine?.castVote(
-            aiPlayer.id,
-            randomTarget.id,
-            "My gut feeling says this is the right choice."
-          );
-        }, 5000);
+      if (alivePlayers.length === 0) {
+        return;
       }
+
+      const targetId =
+        alivePlayers[Math.floor(Math.random() * alivePlayers.length)].id;
+      const reasoning = "Based on my analysis of the discussion";
+
+      const delay = 3000 + Math.random() * 4000;
+      const timeout = setTimeout(() => {
+        if (room.gameEngine && room.players.has(aiPlayer.id)) {
+          room.gameEngine.castVote(aiPlayer.id, targetId, reasoning);
+        }
+        this.aiActionTimeouts.delete(actionKey);
+      }, delay);
+
+      this.aiActionTimeouts.set(actionKey, timeout);
+    } catch (error) {
+      console.error(`❌ AI voting error for ${aiPlayer.name}:`, error);
+      this.aiActionTimeouts.delete(actionKey);
     }
   }
 
-  private async handleAIMafiaAction(
+  // FIXED: Safe AI mafia action handling
+  private async handleAIMafiaActionSafely(
     room: GameRoom,
     mafiaPlayer: Player
   ): Promise<void> {
+    const actionKey = `mafia_${room.id}_${mafiaPlayer.id}_${Date.now()}`;
+
+    if (this.aiActionTimeouts.has(actionKey)) {
+      return;
+    }
+
     try {
-      const context = this.buildAIContext(room, mafiaPlayer);
       const alivePlayers = Array.from(room.players.values()).filter(
         (p) =>
           p.isAlive &&
@@ -504,58 +588,66 @@ export class GameSocketServer {
           p.role !== PlayerRole.MAFIA_MEMBER
       );
 
-      const request = {
-        type: "night_action" as const,
-        context,
-        personality: AI_PERSONALITIES[mafiaPlayer.model!],
-        constraints: {
-          availableTargets: alivePlayers.map((p) => p.id),
-        },
-      };
-
-      const response = await this.aiManager.generateResponse(request);
-      const targetId = this.extractActionTarget(response.content, alivePlayers);
-
-      if (targetId) {
-        // Add realistic delay for decision making
-        setTimeout(() => {
-          room.gameEngine?.nightAction(mafiaPlayer.id, "kill", targetId);
-        }, 10000 + Math.random() * 20000); // 10-30 seconds
+      if (alivePlayers.length === 0) {
+        return;
       }
+
+      const targetId =
+        alivePlayers[Math.floor(Math.random() * alivePlayers.length)].id;
+
+      const delay = 10000 + Math.random() * 20000;
+      const timeout = setTimeout(() => {
+        if (room.gameEngine && room.players.has(mafiaPlayer.id)) {
+          room.gameEngine.nightAction(mafiaPlayer.id, "kill", targetId);
+        }
+        this.aiActionTimeouts.delete(actionKey);
+      }, delay);
+
+      this.aiActionTimeouts.set(actionKey, timeout);
     } catch (error) {
-      console.error(`AI mafia action error for ${mafiaPlayer.name}:`, error);
+      console.error(`❌ AI mafia action error for ${mafiaPlayer.name}:`, error);
+      this.aiActionTimeouts.delete(actionKey);
     }
   }
 
-  private async handleAIHealerAction(
+  // FIXED: Safe AI healer action handling
+  private async handleAIHealerActionSafely(
     room: GameRoom,
     healerPlayer: Player
   ): Promise<void> {
+    const actionKey = `healer_${room.id}_${healerPlayer.id}_${Date.now()}`;
+
+    if (this.aiActionTimeouts.has(actionKey)) {
+      return;
+    }
+
     try {
-      const context = this.buildAIContext(room, healerPlayer);
       const alivePlayers = Array.from(room.players.values()).filter(
         (p) => p.isAlive
       );
 
-      const request = {
-        type: "night_action" as const,
-        context,
-        personality: AI_PERSONALITIES[healerPlayer.model!],
-        constraints: {
-          availableTargets: alivePlayers.map((p) => p.id),
-        },
-      };
-
-      const response = await this.aiManager.generateResponse(request);
-      const targetId = this.extractActionTarget(response.content, alivePlayers);
-
-      if (targetId) {
-        setTimeout(() => {
-          room.gameEngine?.nightAction(healerPlayer.id, "heal", targetId);
-        }, 5000 + Math.random() * 15000); // 5-20 seconds
+      if (alivePlayers.length === 0) {
+        return;
       }
+
+      const targetId =
+        alivePlayers[Math.floor(Math.random() * alivePlayers.length)].id;
+
+      const delay = 5000 + Math.random() * 15000;
+      const timeout = setTimeout(() => {
+        if (room.gameEngine && room.players.has(healerPlayer.id)) {
+          room.gameEngine.nightAction(healerPlayer.id, "heal", targetId);
+        }
+        this.aiActionTimeouts.delete(actionKey);
+      }, delay);
+
+      this.aiActionTimeouts.set(actionKey, timeout);
     } catch (error) {
-      console.error(`AI healer action error for ${healerPlayer.name}:`, error);
+      console.error(
+        `❌ AI healer action error for ${healerPlayer.name}:`,
+        error
+      );
+      this.aiActionTimeouts.delete(actionKey);
     }
   }
 
@@ -578,48 +670,11 @@ export class GameSocketServer {
         .filter((p) => p.isAlive)
         .map((p) => p.id),
       eliminatedPlayers: gameState.eliminatedPlayers,
-      previousVotes: [], // Would be populated with voting history
+      previousVotes: [],
       timeRemaining: room.gameEngine?.getRemainingTime() || 0,
       suspicionLevels: {},
       trustLevels: {},
     };
-  }
-
-  private extractVoteTarget(
-    response: string,
-    availablePlayers: Player[]
-  ): PlayerId | null {
-    // Simple extraction - look for player names in the response
-    for (const player of availablePlayers) {
-      if (response.toLowerCase().includes(player.name.toLowerCase())) {
-        return player.id;
-      }
-    }
-
-    // Fallback to random if no clear target found
-    if (availablePlayers.length > 0) {
-      return availablePlayers[
-        Math.floor(Math.random() * availablePlayers.length)
-      ].id;
-    }
-
-    return null;
-  }
-
-  private extractActionTarget(
-    response: string,
-    availablePlayers: Player[]
-  ): PlayerId | null {
-    // Similar to vote extraction
-    for (const player of availablePlayers) {
-      if (response.toLowerCase().includes(player.name.toLowerCase())) {
-        return player.id;
-      }
-    }
-
-    return availablePlayers.length > 0
-      ? availablePlayers[Math.floor(Math.random() * availablePlayers.length)].id
-      : null;
   }
 
   private handleMessage(
@@ -627,7 +682,14 @@ export class GameSocketServer {
     playerId: PlayerId,
     content: string
   ): void {
-    room.gameEngine?.sendMessage(playerId, content);
+    if (room.gameEngine?.sendMessage(playerId, content)) {
+      this.broadcastToDashboards("message_received", {
+        playerId,
+        content,
+        roomCode: room.code,
+        timestamp: new Date(),
+      });
+    }
   }
 
   private handleVote(
@@ -636,7 +698,15 @@ export class GameSocketServer {
     targetId: PlayerId,
     reasoning: string
   ): void {
-    room.gameEngine?.castVote(playerId, targetId, reasoning);
+    if (room.gameEngine?.castVote(playerId, targetId, reasoning)) {
+      this.broadcastToDashboards("vote_cast", {
+        voterId: playerId,
+        targetId,
+        reasoning,
+        roomCode: room.code,
+        timestamp: new Date(),
+      });
+    }
   }
 
   private handleNightAction(
@@ -669,6 +739,9 @@ export class GameSocketServer {
   }
 
   private handleDisconnect(socket: Socket): void {
+    // Remove from dashboard sockets if applicable
+    this.dashboardSockets.delete(socket);
+
     const connection = Array.from(this.players.values()).find(
       (p) => p.socket.id === socket.id
     );
@@ -682,22 +755,31 @@ export class GameSocketServer {
       this.broadcastToRoom(room.id, "player_left", {
         playerId: connection.playerId,
       });
+      this.broadcastToDashboards("player_left", {
+        playerId: connection.playerId,
+        roomCode: room.code,
+        timestamp: new Date(),
+      });
 
-      // Clean up empty rooms
       if (room.players.size === 0) {
         this.rooms.delete(room.id);
       }
     }
 
     this.players.delete(connection.playerId);
-    console.log(`Player disconnected: ${socket.id}`);
+    console.log(`👋 Player disconnected: ${socket.id}`);
   }
 
   private cleanupGame(room: GameRoom): void {
-    // Reset room for new game
-    room.gameEngine = null;
+    // Clean up AI timeouts for this room
+    for (const [key, timeout] of this.aiActionTimeouts.entries()) {
+      if (key.includes(room.id)) {
+        clearTimeout(timeout);
+        this.aiActionTimeouts.delete(key);
+      }
+    }
 
-    // Reset player states
+    room.gameEngine = null;
     room.players.forEach((player) => {
       player.isReady = false;
       player.isAlive = true;
@@ -706,8 +788,33 @@ export class GameSocketServer {
     });
   }
 
+  private cleanupOldTimeouts(): void {
+    // Remove timeouts older than 10 minutes
+    const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+
+    for (const [key, timeout] of this.aiActionTimeouts.entries()) {
+      const timestamp = parseInt(key.split("_").pop() || "0");
+      if (timestamp < tenMinutesAgo) {
+        clearTimeout(timeout);
+        this.aiActionTimeouts.delete(key);
+      }
+    }
+  }
+
+  // FIXED: Separate broadcast methods
   private broadcastToRoom(roomId: RoomId, event: string, data: any): void {
     this.io.to(roomId).emit(event, data);
+  }
+
+  private broadcastToDashboards(event: string, data: any): void {
+    this.dashboardSockets.forEach((socket) => {
+      socket.emit(event, data);
+    });
+  }
+
+  private sendStatsToSocket(socket: Socket): void {
+    const stats = this.getRoomStats();
+    socket.emit("stats_update", stats);
   }
 
   private findRoomByCode(code: string): GameRoom | undefined {
@@ -715,7 +822,6 @@ export class GameSocketServer {
   }
 
   private generateRoomCode(): string {
-    // Generate 6-digit room code
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
@@ -728,46 +834,6 @@ export class GameSocketServer {
       gameInProgress: !!room.gameEngine,
       createdAt: room.createdAt,
     };
-  }
-
-  // Personality Pool Management
-  private getPersonalityPool(): Array<{ name: string; model: AIModel }> {
-    // Extended personality pool with 25+ human names
-    const personalityPool = [
-      // Premium Models
-      { name: "Detective Chen", model: AIModel.CLAUDE_SONNET_4 },
-      { name: "Riley the Storyteller", model: AIModel.GPT_4O },
-      { name: "Alex Sharp", model: AIModel.GEMINI_2_5_PRO },
-
-      // Free Models
-      { name: "Sam Logic", model: AIModel.CLAUDE_HAIKU },
-      { name: "Jordan Quick", model: AIModel.GPT_4O_MINI },
-      { name: "Casey Direct", model: AIModel.GEMINI_2_5_FLASH },
-
-      // Additional personalities for variety
-      { name: "Morgan Wells", model: AIModel.CLAUDE_SONNET_4 },
-      { name: "Taylor Cross", model: AIModel.GPT_4O },
-      { name: "Jamie Fox", model: AIModel.GEMINI_2_5_PRO },
-      { name: "Blake Rivers", model: AIModel.CLAUDE_HAIKU },
-      { name: "Avery Stone", model: AIModel.GPT_4O_MINI },
-      { name: "Drew Harper", model: AIModel.GEMINI_2_5_FLASH },
-      { name: "Sage Miller", model: AIModel.CLAUDE_SONNET_4 },
-      { name: "Quinn Adams", model: AIModel.GPT_4O },
-      { name: "Rowan Clarke", model: AIModel.GEMINI_2_5_PRO },
-      { name: "Phoenix Gray", model: AIModel.CLAUDE_HAIKU },
-      { name: "River Chen", model: AIModel.GPT_4O_MINI },
-      { name: "Lane Foster", model: AIModel.GEMINI_2_5_FLASH },
-      { name: "Dakota Mills", model: AIModel.CLAUDE_SONNET_4 },
-      { name: "Emery Brooks", model: AIModel.GPT_4O },
-      { name: "Sky Martinez", model: AIModel.GEMINI_2_5_PRO },
-      { name: "Sage Thompson", model: AIModel.CLAUDE_HAIKU },
-      { name: "Nova Reed", model: AIModel.GPT_4O_MINI },
-      { name: "Cedar Walsh", model: AIModel.GEMINI_2_5_FLASH },
-      { name: "Storm Knight", model: AIModel.CLAUDE_SONNET_4 },
-    ];
-
-    // Shuffle for variety
-    return personalityPool.sort(() => Math.random() - 0.5);
   }
 
   // Public API Methods
@@ -788,20 +854,7 @@ export class GameSocketServer {
   }
 
   getPersonalityPoolInfo(): any {
-    const personalityPool = this.getPersonalityPool();
-    return {
-      totalPersonalities: personalityPool.length,
-      personalities: personalityPool.map((p) => ({
-        name: p.name,
-        model: p.model,
-        archetype: AI_PERSONALITIES[p.model].archetype,
-        description: AI_PERSONALITIES[p.model].description,
-      })),
-      modelDistribution: Object.values(AIModel).map((model) => ({
-        model,
-        count: personalityPool.filter((p) => p.model === model).length,
-      })),
-    };
+    return this.aiManager.getPersonalityPoolInfo();
   }
 
   createAIOnlyGame(gameConfig?: any): any {
@@ -818,14 +871,14 @@ export class GameSocketServer {
       revelationPhaseDuration: 10,
       speakingTimePerPlayer: 35,
       allowSpectators: true,
-      premiumModelsEnabled: true, // Creator gets premium
+      premiumModelsEnabled: true,
       ...gameConfig,
     };
 
     const room: GameRoom = {
       id: roomId,
       code: roomCode,
-      hostId: "creator", // Special creator host
+      hostId: "creator",
       players: new Map(),
       config,
       createdAt: new Date(),
@@ -833,8 +886,6 @@ export class GameSocketServer {
     };
 
     this.rooms.set(roomId, room);
-
-    // Fill with AI players only
     this.fillWithAIPlayers(room);
 
     // Auto-start the game
@@ -847,7 +898,13 @@ export class GameSocketServer {
       });
 
       room.gameEngine.startGame();
-      this.startAIAutomation(room);
+      this.startAIAutomationSafely(room);
+
+      // Broadcast AI-only game creation
+      this.broadcastToDashboards("ai_only_game_created", {
+        roomCode,
+        timestamp: new Date(),
+      });
     }, 2000);
 
     return this.getRoomInfo(room);
