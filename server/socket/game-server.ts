@@ -12,7 +12,7 @@ import {
   PlayerId,
   GameConfig,
   PlayerRole,
-} from "@/types/game";
+} from "../lib/types/game";
 import { AI_PERSONALITIES, AIModel } from "../lib/types/ai";
 import { selectGamePersonalities } from "../../src/lib/ai/personality-pool";
 import { v4 as uuidv4 } from "uuid";
