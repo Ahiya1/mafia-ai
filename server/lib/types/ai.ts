@@ -1,4 +1,4 @@
-// AI Model and Personality Types for AI Mafia - Complete Implementation
+// AI Model and Personality Types for AI Mafia - Complete Implementation with Missing Types
 import { PlayerId, PlayerRole, GamePhase, AIModel } from "./game";
 
 // Export AIModel enum from game types for use in other modules
@@ -65,6 +65,32 @@ export interface AIResponse {
   };
 }
 
+// 🔧 FIXED: Add missing PlayerStatus interface
+export interface PlayerStatus {
+  living: Array<{
+    id: PlayerId;
+    name: string;
+    role?: PlayerRole;
+  }>;
+  eliminated: Array<{
+    id: PlayerId;
+    name: string;
+    role: PlayerRole;
+  }>;
+}
+
+// 🔧 FIXED: Add missing EliminationEvent interface
+export interface EliminationEvent {
+  round: number;
+  playerName: string;
+  playerId: PlayerId;
+  role: PlayerRole;
+  cause: "voted_out" | "mafia_kill";
+  voteCount?: number;
+  timestamp: Date;
+}
+
+// 🔧 FIXED: Add missing properties to AIDecisionContext
 export interface AIDecisionContext {
   playerId: PlayerId;
   role: PlayerRole;
@@ -77,6 +103,11 @@ export interface AIDecisionContext {
   timeRemaining: number;
   suspicionLevels: Record<PlayerId, number>;
   trustLevels: Record<PlayerId, number>;
+
+  // 🔧 FIXED: Add the missing optional properties
+  playerStatus?: PlayerStatus;
+  latestElimination?: EliminationEvent;
+  eliminationHistory?: EliminationEvent[];
 }
 
 export interface AIActionRequest {
