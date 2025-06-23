@@ -1,4 +1,4 @@
-# Railway Configuration for AI Mafia
+# Railway Configuration for AI Mafia - FIXED
 [build]
 builder = "nixpacks"
 buildCommand = "npm ci && npm run build && npm run build:server"
@@ -12,14 +12,6 @@ restartPolicyType = "on_failure"
 [environments.production]
 variables = { NODE_ENV = "production" }
 
-[environments.staging]
-variables = { NODE_ENV = "staging" }
-
-# Service configuration
+# Ensure public networking is enabled
 [services.backend]
 source = "."
-domains = ["mafia-ai.up.railway.app"]
-
-[services.frontend]
-source = "."
-domains = ["mafia-ai.xyz"]
