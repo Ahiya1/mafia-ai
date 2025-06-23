@@ -1,10 +1,6 @@
 // Massive AI Personality Pool with Perfect Human Disguise System
-import {
-  AIPersonality,
-  CommunicationStyle,
-  StrategicApproach,
-} from "@/types/ai";
-import { AIModel } from "@/types/game";
+import { AIPersonality } from "../../types/ai";
+import { AIModel } from "../../types/game";
 
 // Pool of 50+ human names for perfect anonymity
 export const HUMAN_NAMES = [

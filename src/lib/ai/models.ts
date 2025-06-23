@@ -8,8 +8,8 @@ import {
   AIPersonality,
   MODEL_CONFIGS,
   AIModel,
-} from "@/types/ai";
-import { PlayerRole, GamePhase } from "@/types/game";
+} from "../../types/ai";
+import { PlayerRole, GamePhase } from "../../types/game";
 import { getPersonalityPoolStats } from "./personality-pool";
 
 export class AIModelManager {
