@@ -17,6 +17,88 @@ import { AI_PERSONALITIES, AIModel } from "../lib/types/ai";
 import { selectGamePersonalities } from "../../src/lib/ai/personality-pool";
 import { v4 as uuidv4 } from "uuid";
 
+// Type definitions for better type safety
+interface AIStatEntry {
+  totalRequests: number;
+  totalCost: number;
+  totalResponseTime: number;
+  errorCount: number;
+  averageResponseTime?: number;
+}
+
+interface GameRoom {
+  id: RoomId;
+  code: string;
+  hostId: PlayerId;
+  players: Map<PlayerId, Player>;
+  config: GameConfig;
+  createdAt: Date;
+  gameEngine: MafiaGameEngine | null;
+}
+
+interface PlayerConnection {
+  playerId: PlayerId;
+  socket: Socket;
+  roomId: RoomId;
+  isActive: boolean;
+  joinedAt: Date;
+}
+
+/**
+ * Safe wrapper for process.loadavg() that handles platform differences
+ */
+function getLoadAverage(): number[] {
+  // Early return for Windows
+  if (process.platform === "win32") {
+    return [0, 0, 0];
+  }
+
+  try {
+    // Check if method exists without calling it first
+    const hasLoadavg = "loadavg" in process;
+    if (hasLoadavg) {
+      const loadavgFn = (process as any).loadavg;
+      if (typeof loadavgFn === "function") {
+        const result = loadavgFn();
+        // Validate result
+        if (Array.isArray(result) && result.length === 3) {
+          return result.map((n) => (typeof n === "number" ? n : 0));
+        }
+      }
+    }
+    return [0, 0, 0];
+  } catch (error) {
+    console.warn("Load average not available:", error);
+    return [0, 0, 0];
+  }
+}
+
+/**
+ * Safe wrapper for process.cpuUsage()
+ */
+function getSafeCpuUsage(): NodeJS.CpuUsage {
+  try {
+    return process.cpuUsage();
+  } catch (error) {
+    console.warn("cpuUsage not available:", error);
+    return { user: 0, system: 0 };
+  }
+}
+
+/**
+ * Type guard function for AI stats validation
+ */
+function isValidAIStats(stats: unknown): stats is AIStatEntry {
+  return (
+    typeof stats === "object" &&
+    stats !== null &&
+    typeof (stats as any).totalRequests === "number" &&
+    typeof (stats as any).totalCost === "number" &&
+    typeof (stats as any).totalResponseTime === "number" &&
+    typeof (stats as any).errorCount === "number"
+  );
+}
+
 export class GameSocketServer {
   private io: SocketIOServer;
   private rooms: Map<RoomId, GameRoom> = new Map();
@@ -25,6 +107,9 @@ export class GameSocketServer {
   private dashboardSockets: Set<Socket> = new Set();
   private aiActionTimeouts: Map<string, NodeJS.Timeout> = new Map();
   private observerSockets: Map<RoomId, Set<Socket>> = new Map();
+  private serverStartTime: Date = new Date();
+  private totalGamesCreated: number = 0;
+  private totalPlayersServed: number = 0;
 
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
@@ -296,6 +381,7 @@ export class GameSocketServer {
     this.rooms.set(roomId, room);
     this.players.set(playerId, connection);
     socket.join(roomId);
+    this.totalGamesCreated++;
 
     this.fillWithAIPlayers(room);
 
@@ -370,6 +456,8 @@ export class GameSocketServer {
         (p) => p.type === PlayerType.HUMAN
       ).length;
       room.config.aiCount = room.players.size - room.config.humanCount;
+
+      this.totalPlayersServed += aiPlayersNeeded;
 
       // Broadcast room update with new players
       this.broadcastToRoom(room.id, "room_updated", {
@@ -1185,19 +1273,33 @@ export class GameSocketServer {
   }
 
   /**
-   * Terminates a room by its ID.
-   * Cleans up players, observers, AI timeouts, and notifies dashboards and sockets.
+   * Enhanced termination with better cleanup and logging
    */
-  public terminateRoom(roomId: RoomId): void {
+  public terminateRoom(roomId: RoomId, reason: string = "Terminated"): any {
     const room = this.rooms.get(roomId);
-    if (!room) return;
+    if (!room) {
+      return { success: false, message: "Room not found" };
+    }
+
+    const preTerminationInfo = {
+      playerCount: room.players.size,
+      gameInProgress: !!room.gameEngine,
+      createdAt: room.createdAt,
+    };
 
     // Remove all player connections for this room
     for (const [playerId, connection] of this.players.entries()) {
       if (connection.roomId === roomId) {
         try {
           connection.socket.leave(roomId);
-        } catch {}
+          connection.socket.emit("room_terminated", {
+            message: reason,
+            roomId,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.warn(`Failed to notify player ${playerId}:`, error);
+        }
         this.players.delete(playerId);
       }
     }
@@ -1208,16 +1310,25 @@ export class GameSocketServer {
       for (const socket of observers) {
         try {
           socket.leave(roomId + "_observers");
-        } catch {}
+          socket.emit("room_terminated", {
+            message: reason,
+            roomId,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.warn("Failed to notify observer:", error);
+        }
       }
       this.observerSockets.delete(roomId);
     }
 
     // Clean up any AI timeouts for this room
+    let timeoutsCleaned = 0;
     for (const [key, timeout] of this.aiActionTimeouts.entries()) {
-      if (key.startsWith(roomId)) {
+      if (key.includes(roomId)) {
         clearTimeout(timeout);
         this.aiActionTimeouts.delete(key);
+        timeoutsCleaned++;
       }
     }
 
@@ -1230,24 +1341,41 @@ export class GameSocketServer {
       this.sanitizeForBroadcast({
         roomCode: room.code,
         roomId: room.id,
-        reason: "Terminated by creator",
+        reason,
+        preTerminationInfo,
+        timeoutsCleaned,
         timestamp: new Date().toISOString(),
       })
     );
 
     // Notify all sockets in the room
     this.io.to(roomId).emit("room_terminated", {
-      message: "This game has been terminated by the creator.",
+      message: reason,
       roomId,
+      timestamp: new Date().toISOString(),
     });
+
+    console.log(
+      `🔥 Room ${room.code} terminated: ${reason} (${timeoutsCleaned} timeouts cleaned)`
+    );
+
+    return {
+      success: true,
+      preTerminationInfo,
+      timeoutsCleaned,
+      playersNotified: preTerminationInfo.playerCount,
+    };
   }
 
-  // Public API Methods
+  // 🚀 ENHANCED PUBLIC API METHODS
+
   getRoomStats(): any {
     const roomList = Array.from(this.rooms.values()).map((room) => ({
       ...this.getRoomInfo(room),
       aiCount: room.config.aiCount,
       humanCount: room.config.humanCount,
+      hostId: room.hostId,
+      premiumModelsEnabled: room.config.premiumModelsEnabled,
     }));
 
     return {
@@ -1257,6 +1385,186 @@ export class GameSocketServer {
       totalPlayers: this.players.size,
       roomList,
     };
+  }
+
+  /**
+   * NEW: Get detailed room information for enhanced dashboard
+   */
+  getDetailedRoomInfo(): any[] {
+    return Array.from(this.rooms.values()).map((room) => {
+      const gameState = room.gameEngine?.getGameState();
+      const players = Array.from(room.players.values());
+
+      return {
+        id: room.id,
+        code: room.code,
+        hostId: room.hostId,
+        playerCount: room.players.size,
+        maxPlayers: room.config.maxPlayers,
+        gameInProgress: !!room.gameEngine,
+        gamePhase: gameState?.phase || "waiting",
+        currentRound: gameState?.currentRound || 0,
+        createdAt: room.createdAt.toISOString(),
+        humanCount: players.filter((p) => p.type === PlayerType.HUMAN).length,
+        aiCount: players.filter((p) => p.type === PlayerType.AI).length,
+        premiumModelsEnabled: room.config.premiumModelsEnabled,
+        messagesCount: gameState?.messages.length || 0,
+        votesCount: gameState?.votes.length || 0,
+        eliminatedCount: gameState?.eliminatedPlayers.length || 0,
+        aiModels: players
+          .filter((p) => p.type === PlayerType.AI)
+          .map((p) => p.model)
+          .filter(Boolean),
+        participants: players.map((p) => ({
+          id: p.id,
+          name: p.name,
+          type: p.type,
+          isAlive: p.isAlive,
+          isReady: p.isReady,
+          role: p.role,
+          model: p.model,
+        })),
+      };
+    });
+  }
+
+  /**
+   * NEW: Get detailed game information for a specific game
+   */
+  getGameDetails(gameId: string): any | null {
+    const room = this.rooms.get(gameId);
+    if (!room) return null;
+
+    const gameState = room.gameEngine?.getGameState();
+    const players = Array.from(room.players.values());
+
+    return {
+      id: room.id,
+      code: room.code,
+      hostId: room.hostId,
+      config: room.config,
+      createdAt: room.createdAt.toISOString(),
+      gameState: gameState
+        ? {
+            phase: gameState.phase,
+            currentRound: gameState.currentRound,
+            winner: gameState.winner,
+            phaseStartTime: gameState.phaseStartTime.toISOString(),
+            phaseEndTime: gameState.phaseEndTime.toISOString(),
+            messagesCount: gameState.messages.length,
+            votesCount: gameState.votes.length,
+            eliminatedPlayersCount: gameState.eliminatedPlayers.length,
+          }
+        : null,
+      players: players.map((p) => ({
+        id: p.id,
+        name: p.name,
+        type: p.type,
+        role: p.role,
+        isAlive: p.isAlive,
+        isReady: p.isReady,
+        model: p.model,
+        lastActive: p.lastActive.toISOString(),
+        gameStats: p.gameStats,
+      })),
+      aiModels: players
+        .filter((p) => p.type === PlayerType.AI)
+        .map((p) => p.model)
+        .filter(Boolean),
+      statistics: {
+        totalMessages: gameState?.messages.length || 0,
+        totalVotes: gameState?.votes.length || 0,
+        gameDuration: gameState
+          ? Date.now() - gameState.phaseStartTime.getTime()
+          : 0,
+        averageMessageLength: gameState?.messages.length
+          ? gameState.messages.reduce((sum, m) => sum + m.content.length, 0) /
+            gameState.messages.length
+          : 0,
+      },
+    };
+  }
+
+  /**
+   * NEW: Get comprehensive server metrics
+   */
+  getServerMetrics(): any {
+    const rooms = Array.from(this.rooms.values());
+    const activeGames = rooms.filter((r) => r.gameEngine);
+    const players = Array.from(this.players.values());
+
+    try {
+      return {
+        uptime: Date.now() - this.serverStartTime.getTime(),
+        totalRooms: this.rooms.size,
+        activeRooms: activeGames.length,
+        totalPlayers: this.players.size,
+        dashboardConnections: this.dashboardSockets.size,
+        observerConnections: Array.from(this.observerSockets.values()).reduce(
+          (sum, set) => sum + set.size,
+          0
+        ),
+        aiTimeouts: this.aiActionTimeouts.size,
+        performance: {
+          memoryUsage: process.memoryUsage(),
+          cpuUsage: getSafeCpuUsage(),
+          loadAverage: getLoadAverage(),
+        },
+        gameStatistics: {
+          totalGamesCreated: this.totalGamesCreated,
+          totalPlayersServed: this.totalPlayersServed,
+          averagePlayersPerRoom: rooms.length
+            ? rooms.reduce((sum, r) => sum + r.players.size, 0) / rooms.length
+            : 0,
+          aiPlayerPercentage: players.length
+            ? (players.filter(
+                (p) =>
+                  this.rooms.get(p.roomId)?.players.get(p.playerId)?.type ===
+                  PlayerType.AI
+              ).length /
+                players.length) *
+              100
+            : 0,
+        },
+        networkActivity: {
+          socketsConnected: this.io.sockets.sockets.size,
+          roomsWithObservers: this.observerSockets.size,
+        },
+      };
+    } catch (error) {
+      console.error("Error getting server metrics:", error);
+      return {
+        uptime: 0,
+        totalRooms: this.rooms.size,
+        activeRooms: activeGames.length,
+        totalPlayers: this.players.size,
+        dashboardConnections: this.dashboardSockets.size,
+        observerConnections: 0,
+        aiTimeouts: this.aiActionTimeouts.size,
+        performance: {
+          memoryUsage: {
+            rss: 0,
+            heapTotal: 0,
+            heapUsed: 0,
+            external: 0,
+            arrayBuffers: 0,
+          },
+          cpuUsage: { user: 0, system: 0 },
+          loadAverage: [0, 0, 0],
+        },
+        gameStatistics: {
+          totalGamesCreated: this.totalGamesCreated,
+          totalPlayersServed: this.totalPlayersServed,
+          averagePlayersPerRoom: 0,
+          aiPlayerPercentage: 0,
+        },
+        networkActivity: {
+          socketsConnected: 0,
+          roomsWithObservers: 0,
+        },
+        error: "Metrics collection failed",
+      };
+    }
   }
 
   getAIUsageStats(): any {
@@ -1296,6 +1604,7 @@ export class GameSocketServer {
     };
 
     this.rooms.set(roomId, room);
+    this.totalGamesCreated++;
     this.fillWithAIPlayers(room);
 
     setTimeout(() => {
@@ -1392,22 +1701,4 @@ export class GameSocketServer {
       timestamp: new Date().toISOString(),
     });
   }
-}
-
-interface GameRoom {
-  id: RoomId;
-  code: string;
-  hostId: PlayerId;
-  players: Map<PlayerId, Player>;
-  config: GameConfig;
-  createdAt: Date;
-  gameEngine: MafiaGameEngine | null;
-}
-
-interface PlayerConnection {
-  playerId: PlayerId;
-  socket: Socket;
-  roomId: RoomId;
-  isActive: boolean;
-  joinedAt: Date;
 }
