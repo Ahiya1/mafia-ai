@@ -1,0 +1,378 @@
+// This is your Prisma schema file for AI Mafia
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // For Supabase connection pooling
+}
+
+// ================================
+// USER MANAGEMENT & AUTHENTICATION
+// ================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  username  String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // User preferences and settings
+  preferences Json @default("{}")
+
+  // Package ownership for monetization
+  packages UserPackage[]
+
+  // Game participation
+  gameParticipations GameParticipation[]
+  rooms              Room[]
+
+  // Analytics and behavior data
+  behaviorData UserBehaviorData[]
+
+  @@map("users")
+}
+
+model UserPackage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  packageType    String   // "starter", "social", "premium"
+  gamesRemaining Int      @default(0)
+  expiresAt      DateTime
+  purchaseDate   DateTime @default(now())
+  
+  // PayPal transaction info
+  transactionId String? @unique
+  amountPaid    Float?
+  currency      String? @default("USD")
+
+  @@map("user_packages")
+}
+
+// ================================
+// GAME ROOMS & SESSIONS
+// ================================
+
+model Room {
+  id        String   @id @default(cuid())
+  code      String   @unique // 6-digit room code
+  name      String?
+  hostId    String
+  host      User     @relation(fields: [hostId], references: [id])
+  
+  // Room configuration
+  maxPlayers           Int     @default(10)
+  allowSpectators      Boolean @default(false)
+  premiumModelsEnabled Boolean @default(false)
+  isPrivate            Boolean @default(false)
+  
+  // Room state
+  status    RoomStatus @default(WAITING)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  
+  // Related data
+  games        Game[]
+  participants GameParticipation[]
+
+  @@map("rooms")
+}
+
+enum RoomStatus {
+  WAITING
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+model Game {
+  id     String @id @default(cuid())
+  roomId String
+  room   Room   @relation(fields: [roomId], references: [id])
+  
+  // Game configuration and state
+  gameConfig Json
+  
+  // Game progression
+  phase        GamePhase @default(WAITING)
+  currentRound Int       @default(0)
+  winner       String?   // "citizens" | "mafia"
+  winReason    String?
+  
+  // Timing
+  startedAt   DateTime?
+  endedAt     DateTime?
+  duration    Int?      // in seconds
+  createdAt   DateTime  @default(now())
+  
+  // Game data
+  finalState Json? // Complete game state at end
+  
+  // Related data
+  participants GameParticipation[]
+  events       GameEvent[]
+  rounds       GameRound[]
+  
+  // Analytics
+  analytics GameAnalytics?
+
+  @@map("games")
+}
+
+enum GamePhase {
+  WAITING
+  ROLE_ASSIGNMENT
+  NIGHT
+  REVELATION
+  DISCUSSION
+  VOTING
+  GAME_OVER
+}
+
+model GameParticipation {
+  id     String @id @default(cuid())
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  
+  roomId String
+  room   Room   @relation(fields: [roomId], references: [id])
+  
+  userId String?
+  user   User?  @relation(fields: [userId], references: [id])
+  
+  // Player details
+  playerName String
+  playerType PlayerType
+  role       PlayerRole?
+  aiModel    String?     // AI model used
+  
+  // Game outcome
+  isAlive      Boolean @default(true)
+  eliminatedAt DateTime?
+  eliminationCause String? // "voted_out" | "mafia_kill"
+  
+  // Performance stats
+  survived     Boolean @default(false)
+  won          Boolean @default(false)
+  votesReceived Int    @default(0)
+  accuracy     Float?  // For AI detection accuracy
+  
+  joinedAt DateTime @default(now())
+
+  @@unique([gameId, playerName])
+  @@map("game_participations")
+}
+
+enum PlayerType {
+  HUMAN
+  AI
+}
+
+enum PlayerRole {
+  MAFIA_LEADER
+  MAFIA_MEMBER
+  HEALER
+  CITIZEN
+}
+
+// ================================
+// GAME EVENTS & ANALYTICS
+// ================================
+
+model GameEvent {
+  id     String @id @default(cuid())
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  
+  type      String
+  phase     GamePhase
+  round     Int
+  data      Json
+  timestamp DateTime  @default(now())
+
+  @@map("game_events")
+}
+
+model GameRound {
+  id     String @id @default(cuid())
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  
+  roundNumber Int
+  phase       GamePhase
+  
+  // Round events
+  messages     Json @default("[]")  // Discussion messages
+  votes        Json @default("[]")  // Voting data
+  nightActions Json @default("[]")  // Night phase actions
+  eliminations Json @default("[]")  // Players eliminated
+  
+  startedAt DateTime @default(now())
+  endedAt   DateTime?
+  duration  Int?     // in seconds
+
+  @@unique([gameId, roundNumber])
+  @@map("game_rounds")
+}
+
+model GameAnalytics {
+  id     String @id @default(cuid())
+  gameId String @unique
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  
+  // Basic metrics
+  totalRounds      Int
+  totalMessages    Int
+  totalVotes       Int
+  gameDuration     Int
+  
+  // Player composition
+  humanPlayers     Int
+  aiPlayers        Int
+  
+  // AI metrics
+  aiCost           Float
+  aiRequests       Int
+  modelUsage       Json // Usage by model type
+  
+  // Behavioral data
+  votingPatterns   Json
+  discussionData   Json
+  suspicionLevels  Json
+  
+  // Research data (anonymized)
+  researchMetrics Json?
+  
+  createdAt DateTime @default(now())
+
+  @@map("game_analytics")
+}
+
+// ================================
+// RESEARCH & BEHAVIORAL DATA
+// ================================
+
+model UserBehaviorData {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Behavioral metrics (anonymized for research)
+  aiDetectionAccuracy Float?
+  votingPatterns      Json
+  communicationStyle  Json
+  strategicDecisions  Json
+  trustNetworks       Json
+  
+  // Aggregated over time
+  gamesPlayed         Int   @default(0)
+  totalWins           Int   @default(0)
+  averageGameLength   Float?
+  preferredRoles      Json?
+  
+  // Research consent
+  researchConsent Boolean @default(false)
+  dataRetention   String  @default("1_year") // "1_year" | "indefinite" | "delete"
+  
+  lastUpdated DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@map("user_behavior_data")
+}
+
+// ================================
+// AI USAGE & COST TRACKING
+// ================================
+
+model AIUsageLog {
+  id String @id @default(cuid())
+  
+  // Request details
+  model         String
+  requestType   String // "discussion" | "vote" | "night_action"
+  inputTokens   Int
+  outputTokens  Int
+  cost          Float
+  responseTime  Int    // milliseconds
+  
+  // Context
+  gameId        String?
+  userId        String?
+  playerName    String?
+  
+  // Success/failure
+  success       Boolean @default(true)
+  errorMessage  String?
+  
+  timestamp     DateTime @default(now())
+
+  @@map("ai_usage_logs")
+}
+
+model SystemMetrics {
+  id String @id @default(cuid())
+  
+  // Daily aggregates
+  date              DateTime @unique @db.Date
+  
+  // Usage metrics
+  totalGames        Int      @default(0)
+  totalUsers        Int      @default(0)
+  totalAIRequests   Int      @default(0)
+  totalAICost       Float    @default(0)
+  
+  // Performance metrics
+  averageGameLength Float?
+  peakConcurrentUsers Int    @default(0)
+  serverUptime      Float?   // percentage
+  
+  // Revenue metrics (for Phase 3)
+  revenue           Float    @default(0)
+  packagesSOLD       Int      @default(0)
+  
+  createdAt         DateTime @default(now())
+
+  @@map("system_metrics")
+}
+
+// ================================
+// CREATOR & ADMIN FEATURES
+// ================================
+
+model CreatorAccess {
+  id String @id @default(cuid())
+  
+  sessionId     String   @unique
+  ipAddress     String?
+  userAgent     String?
+  
+  // Access details
+  accessGranted DateTime @default(now())
+  expiresAt     DateTime
+  lastUsed      DateTime @default(now())
+  
+  // Usage tracking
+  gamesCreated  Int      @default(0)
+  featuresUsed  Json     @default("[]")
+
+  @@map("creator_access")
+}
+
+// ================================
+// INDEXES FOR PERFORMANCE
+// ================================
+
+// Game performance indexes
+// @@index([status], map: "idx_rooms_status")
+// @@index([createdAt], map: "idx_games_created")
+// @@index([phase], map: "idx_games_phase")
+// @@index([timestamp], map: "idx_events_timestamp")
+// @@index([date], map: "idx_metrics_date")
+// @@index([model, timestamp], map: "idx_ai_usage")

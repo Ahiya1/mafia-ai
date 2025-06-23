@@ -1246,6 +1246,76 @@ export class GameSocketServer {
 
     return this.getRoomInfo(room);
   }
+  public cleanupOldSessions(): void {
+    console.log("🧹 Starting cleanup of old sessions...");
+
+    const now = Date.now();
+    const ONE_HOUR = 60 * 60 * 1000;
+    const ONE_DAY = 24 * ONE_HOUR;
+
+    // Clean up old AI timeouts (older than 1 hour)
+    let timeoutsCleared = 0;
+    for (const [key, timeout] of this.aiActionTimeouts.entries()) {
+      const timestamp = parseInt(key.split("_").pop() || "0");
+      if (timestamp < now - ONE_HOUR) {
+        clearTimeout(timeout);
+        this.aiActionTimeouts.delete(key);
+        timeoutsCleared++;
+      }
+    }
+
+    // Clean up empty rooms (no players for more than 1 hour)
+    let roomsCleaned = 0;
+    for (const [roomId, room] of this.rooms.entries()) {
+      if (room.players.size === 0) {
+        const roomAge = now - room.createdAt.getTime();
+        if (roomAge > ONE_HOUR) {
+          this.rooms.delete(roomId);
+          roomsCleaned++;
+        }
+      }
+    }
+
+    // Clean up disconnected dashboard sockets
+    let dashboardsCleaned = 0;
+    for (const socket of this.dashboardSockets) {
+      if (!socket.connected) {
+        this.dashboardSockets.delete(socket);
+        dashboardsCleaned++;
+      }
+    }
+
+    // Clean up disconnected player connections
+    let playersCleaned = 0;
+    for (const [playerId, connection] of this.players.entries()) {
+      if (!connection.socket.connected) {
+        const connectionAge = now - connection.joinedAt.getTime();
+        if (connectionAge > ONE_HOUR) {
+          this.players.delete(playerId);
+          playersCleaned++;
+        }
+      }
+    }
+
+    console.log(`🧹 Cleanup completed:`, {
+      timeoutsCleared,
+      roomsCleaned,
+      dashboardsCleaned,
+      playersCleaned,
+      activeRooms: this.rooms.size,
+      activePlayers: this.players.size,
+      activeDashboards: this.dashboardSockets.size,
+    });
+
+    // Broadcast cleanup stats to dashboards
+    this.broadcastToDashboards("cleanup_completed", {
+      timeoutsCleared,
+      roomsCleaned,
+      dashboardsCleaned,
+      playersCleaned,
+      timestamp: new Date().toISOString(),
+    });
+  }
 }
 
 interface GameRoom {

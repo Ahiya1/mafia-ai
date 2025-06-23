@@ -1,0 +1,25 @@
+# Railway Configuration for AI Mafia
+[build]
+builder = "nixpacks"
+buildCommand = "npm ci && npm run build && npm run build:server"
+
+[deploy]
+startCommand = "npm run start:server"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+
+[environments.production]
+variables = { NODE_ENV = "production" }
+
+[environments.staging]
+variables = { NODE_ENV = "staging" }
+
+# Service configuration
+[services.backend]
+source = "."
+domains = ["mafia-ai.up.railway.app"]
+
+[services.frontend]
+source = "."
+domains = ["mafia-ai.xyz"]
