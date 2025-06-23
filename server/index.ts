@@ -630,7 +630,7 @@ const startBackgroundTasks = () => {
 };
 
 // 🔥 CRITICAL: Proper Railway server binding
-httpServer.listen(PORT, HOST, () => {
+httpServer.listen(PORT, HOST as string, () => {
   logger.info(`🎮 AI Mafia Server running on ${HOST}:${PORT}`);
   logger.info(`🔌 WebSocket server: ready`);
   logger.info(`🗄️  Database: ${database ? "connected" : "disabled"}`);
