@@ -22,7 +22,10 @@
     "setup": "chmod +x start-dev.sh && ./start-dev.sh",
     "migrate": "node scripts/migrate.js",
     "seed": "node scripts/seed.js",
-    "deploy": "npm run build && npm run build:server"
+    "deploy": "npm run build && npm run build:server",
+    "postbuild": "echo 'Build completed successfully'",
+    "railway:build": "npm run build",
+    "railway:start": "npm start"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
