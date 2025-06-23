@@ -1,4 +1,4 @@
-// server/lib/game/engine.ts - Game Engine for Server
+// server/lib/game/engine.ts - FIXED: Win condition timing + circular reference prevention
 import {
   GameState,
   Player,
@@ -44,6 +44,40 @@ export class MafiaGameEngine extends EventEmitter {
     };
   }
 
+  // 🔧 FIXED: Prevent circular references in serialized game state
+  getSerializableGameState(): any {
+    return {
+      id: this.gameState.id,
+      roomId: this.gameState.roomId,
+      phase: this.gameState.phase,
+      currentRound: this.gameState.currentRound,
+      players: Array.from(this.gameState.players.values()).map((player) => ({
+        id: player.id,
+        name: player.name,
+        type: player.type,
+        role: player.role,
+        isAlive: player.isAlive,
+        isReady: player.isReady,
+        model: player.model,
+        lastActive: player.lastActive.toISOString(), // Convert Date to string
+        gameStats: player.gameStats,
+      })),
+      votes: this.gameState.votes.map((vote) => ({
+        voterId: vote.voterId,
+        targetId: vote.targetId,
+        reasoning: vote.reasoning,
+        timestamp: vote.timestamp.toISOString(),
+      })),
+      eliminatedPlayers: this.gameState.eliminatedPlayers,
+      winner: this.gameState.winner,
+      phaseStartTime: this.gameState.phaseStartTime.toISOString(),
+      phaseEndTime: this.gameState.phaseEndTime.toISOString(),
+      speakingOrder: this.gameState.speakingOrder,
+      currentSpeaker: this.gameState.currentSpeaker,
+      gameConfig: this.gameState.gameConfig,
+    };
+  }
+
   // Player Management
   addPlayer(player: Player): boolean {
     if (this.gameState.players.size >= this.gameState.gameConfig.maxPlayers) {
@@ -72,13 +106,17 @@ export class MafiaGameEngine extends EventEmitter {
     this.gameState.players.delete(playerId);
     this.emitEvent("player_left", { playerId });
 
-    // Check if game should end due to insufficient players
+    // 🔧 FIXED: Always check win condition when player leaves during game
     if (
       this.gameState.phase !== GamePhase.WAITING &&
       this.gameState.phase !== GamePhase.GAME_OVER
     ) {
+      console.log(`🔍 Checking win condition after player ${playerId} left`);
       const winCondition = this.checkWinCondition();
       if (winCondition.isGameOver) {
+        console.log(
+          `🏆 Game ending: ${winCondition.winner} wins - ${winCondition.reason}`
+        );
         this.endGame(winCondition.winner!, winCondition.reason);
       }
     }
@@ -124,6 +162,7 @@ export class MafiaGameEngine extends EventEmitter {
       this.gameState.players.set(player.id, player);
     });
 
+    console.log(`🎭 Roles assigned: 2 Mafia, 1 Healer, 7 Citizens`);
     this.emitEvent("roles_assigned", {
       assignments: shuffled.map((p) => ({ id: p.id, role: p.role })),
     });
@@ -133,6 +172,10 @@ export class MafiaGameEngine extends EventEmitter {
     const oldPhase = this.gameState.phase;
     this.gameState.phase = newPhase;
     this.gameState.phaseStartTime = new Date();
+
+    console.log(
+      `🔄 Phase change: ${oldPhase} → ${newPhase} (Round ${this.gameState.currentRound})`
+    );
 
     // Clear existing timers
     if (this.phaseTimer) clearTimeout(this.phaseTimer);
@@ -180,13 +223,17 @@ export class MafiaGameEngine extends EventEmitter {
     this.gameState.currentRound++;
     this.gameState.nightActions = [];
 
-    // Night phase allows mafia to discuss and choose target, healer to choose protection
+    console.log(
+      `🌙 Night phase started - Round ${this.gameState.currentRound}`
+    );
     this.emitEvent("night_phase_started", {
       round: this.gameState.currentRound,
     });
   }
 
   private handleRevelationPhase(): void {
+    console.log(`💀 Processing night actions...`);
+
     // Process night actions and reveal results
     const eliminatedPlayer = this.processNightActions();
 
@@ -195,21 +242,32 @@ export class MafiaGameEngine extends EventEmitter {
       eliminatedPlayer.isAlive = false;
       this.gameState.players.set(eliminatedPlayer.id, eliminatedPlayer);
 
+      console.log(
+        `💀 ${eliminatedPlayer.name} (${eliminatedPlayer.role}) was eliminated by mafia`
+      );
       this.emitEvent("player_eliminated", {
         playerId: eliminatedPlayer.id,
         role: eliminatedPlayer.role!,
         cause: "mafia_kill",
       });
     } else {
+      console.log(`🛡️ No elimination occurred (healer save or no action)`);
       this.emitEvent("no_elimination", { reason: "healer_save" });
     }
 
-    // Check win condition
+    // 🔧 FIXED: ALWAYS check win condition after night phase
+    console.log(`🔍 Checking win condition after night phase...`);
     const winCondition = this.checkWinCondition();
+    console.log(`🔍 Win condition result:`, winCondition);
+
     if (winCondition.isGameOver) {
+      console.log(
+        `🏆 Game should end: ${winCondition.winner} wins - ${winCondition.reason}`
+      );
       setTimeout(() => {
         this.endGame(winCondition.winner!, winCondition.reason);
       }, 2000);
+      return; // Exit early, don't continue to discussion
     }
   }
 
@@ -218,6 +276,8 @@ export class MafiaGameEngine extends EventEmitter {
     const alivePlayers = Array.from(this.gameState.players.values())
       .filter((p) => p.isAlive)
       .sort(() => Math.random() - 0.5); // Randomize order
+
+    console.log(`💬 Discussion phase: ${alivePlayers.length} players alive`);
 
     this.gameState.speakingOrder = alivePlayers.map((p) => p.id);
     this.gameState.currentSpeaker = this.gameState.speakingOrder[0];
@@ -271,6 +331,8 @@ export class MafiaGameEngine extends EventEmitter {
       .filter((p) => p.isAlive)
       .sort(() => Math.random() - 0.5);
 
+    console.log(`🗳️ Voting phase: ${alivePlayers.length} players can vote`);
+
     this.gameState.speakingOrder = alivePlayers.map((p) => p.id);
     this.gameState.currentSpeaker = this.gameState.speakingOrder[0];
 
@@ -280,6 +342,8 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   private handlePhaseTimeout(): void {
+    console.log(`⏰ Phase timeout: ${this.gameState.phase}`);
+
     switch (this.gameState.phase) {
       case GamePhase.NIGHT:
         this.changePhase(GamePhase.REVELATION);
@@ -361,6 +425,7 @@ export class MafiaGameEngine extends EventEmitter {
     );
     this.gameState.votes.push(vote);
 
+    console.log(`🗳️ ${voter.name} voted to eliminate ${target.name}`);
     this.emitEvent("vote_cast", { vote });
 
     // Advance to next voter
@@ -427,6 +492,11 @@ export class MafiaGameEngine extends EventEmitter {
     );
     this.gameState.nightActions.push(nightAction);
 
+    const targetName = targetId
+      ? this.gameState.players.get(targetId)?.name
+      : "none";
+    console.log(`🌙 ${player.name} wants to ${action} ${targetName}`);
+
     this.emitEvent("night_action_received", { action: nightAction });
 
     return true;
@@ -442,6 +512,7 @@ export class MafiaGameEngine extends EventEmitter {
     );
 
     if (!killAction || !killAction.targetId) {
+      console.log(`🌙 No kill action found`);
       return null; // No kill attempted
     }
 
@@ -450,15 +521,19 @@ export class MafiaGameEngine extends EventEmitter {
 
     // Check if target was healed
     if (healAction && healAction.targetId === killAction.targetId) {
+      console.log(`🛡️ ${target.name} was protected by the healer!`);
       return null; // Healer saved the target
     }
 
+    console.log(`💀 ${target.name} will be eliminated`);
     return target;
   }
 
   private processVotes(): void {
+    console.log(`🗳️ Processing ${this.gameState.votes.length} votes...`);
+
     if (this.gameState.votes.length === 0) {
-      // No votes cast, move to next night
+      console.log(`🗳️ No votes cast, moving to next night`);
       this.changePhase(GamePhase.NIGHT);
       return;
     }
@@ -476,6 +551,9 @@ export class MafiaGameEngine extends EventEmitter {
     let tiedPlayers: PlayerId[] = [];
 
     voteCounts.forEach((votes, playerId) => {
+      const playerName = this.gameState.players.get(playerId)?.name;
+      console.log(`🗳️ ${playerName}: ${votes} votes`);
+
       if (votes > maxVotes) {
         maxVotes = votes;
         eliminatedPlayerId = playerId;
@@ -487,6 +565,9 @@ export class MafiaGameEngine extends EventEmitter {
 
     // Handle ties (no elimination)
     if (tiedPlayers.length > 1) {
+      console.log(
+        `🗳️ Vote tied between ${tiedPlayers.length} players, no elimination`
+      );
       this.emitEvent("vote_tied", { tiedPlayers, voteCount: maxVotes });
       this.changePhase(GamePhase.NIGHT);
       return;
@@ -499,6 +580,9 @@ export class MafiaGameEngine extends EventEmitter {
       this.gameState.eliminatedPlayers.push(eliminatedPlayerId);
       this.gameState.players.set(eliminatedPlayerId, eliminatedPlayer);
 
+      console.log(
+        `🗳️ ${eliminatedPlayer.name} (${eliminatedPlayer.role}) was voted out with ${maxVotes} votes`
+      );
       this.emitEvent("player_eliminated", {
         playerId: eliminatedPlayerId,
         role: eliminatedPlayer.role!,
@@ -506,13 +590,19 @@ export class MafiaGameEngine extends EventEmitter {
         voteCount: maxVotes,
       });
 
-      // Check win condition
+      // 🔧 FIXED: ALWAYS check win condition after elimination
+      console.log(`🔍 Checking win condition after vote elimination...`);
       const winCondition = this.checkWinCondition();
+      console.log(`🔍 Win condition result:`, winCondition);
+
       if (winCondition.isGameOver) {
+        console.log(
+          `🏆 Game should end: ${winCondition.winner} wins - ${winCondition.reason}`
+        );
         setTimeout(() => {
           this.endGame(winCondition.winner!, winCondition.reason);
         }, 3000);
-        return;
+        return; // Exit early, don't continue to next night
       }
     }
 
@@ -522,6 +612,7 @@ export class MafiaGameEngine extends EventEmitter {
     }, 3000);
   }
 
+  // 🔧 FIXED: Enhanced win condition check with detailed logging
   private checkWinCondition(): WinCondition {
     const alivePlayers = Array.from(this.gameState.players.values()).filter(
       (p) => p.isAlive
@@ -534,8 +625,24 @@ export class MafiaGameEngine extends EventEmitter {
       (p) => p.role === PlayerRole.CITIZEN || p.role === PlayerRole.HEALER
     );
 
+    console.log(`🔍 Win Condition Check:`);
+    console.log(`   Total alive: ${alivePlayers.length}`);
+    console.log(
+      `   Alive mafia: ${aliveMafia.length} (${aliveMafia
+        .map((p) => p.name)
+        .join(", ")})`
+    );
+    console.log(
+      `   Alive citizens: ${aliveCitizens.length} (${aliveCitizens
+        .map((p) => p.name)
+        .join(", ")})`
+    );
+
     // Mafia wins if they equal or outnumber citizens
-    if (aliveMafia.length >= aliveCitizens.length) {
+    if (aliveMafia.length >= aliveCitizens.length && aliveMafia.length > 0) {
+      console.log(
+        `🏆 MAFIA WINS: ${aliveMafia.length} mafia >= ${aliveCitizens.length} citizens`
+      );
       return {
         winner: "mafia",
         reason: "Mafia achieved numerical parity",
@@ -545,6 +652,7 @@ export class MafiaGameEngine extends EventEmitter {
 
     // Citizens win if all mafia are eliminated
     if (aliveMafia.length === 0) {
+      console.log(`🏆 CITIZENS WIN: All mafia eliminated`);
       return {
         winner: "citizens",
         reason: "All mafia members eliminated",
@@ -552,6 +660,9 @@ export class MafiaGameEngine extends EventEmitter {
       };
     }
 
+    console.log(
+      `🔍 Game continues: ${aliveMafia.length} mafia vs ${aliveCitizens.length} citizens`
+    );
     return {
       reason: "Game continues",
       isGameOver: false,
@@ -559,6 +670,8 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   private endGame(winner: "citizens" | "mafia", reason: string): void {
+    console.log(`🏁 GAME ENDED: ${winner} wins - ${reason}`);
+
     this.gameState.phase = GamePhase.GAME_OVER;
     this.gameState.winner = winner;
 
@@ -568,7 +681,7 @@ export class MafiaGameEngine extends EventEmitter {
     this.emitEvent("game_ended", {
       winner,
       reason,
-      finalState: this.getGameState(),
+      finalState: this.getSerializableGameState(), // Use serializable version
       stats: this.calculateGameStats(),
     });
   }
@@ -594,12 +707,13 @@ export class MafiaGameEngine extends EventEmitter {
     }
   }
 
+  // 🔧 FIXED: Prevent circular references in events
   private emitEvent(type: string, data: any): void {
     const event: GameEvent = {
       id: uuidv4(),
       type: type as any,
       timestamp: new Date(),
-      data,
+      data: this.sanitizeEventData(data), // Sanitize data to prevent circular refs
       phase: this.gameState.phase,
       round: this.gameState.currentRound,
     };
@@ -607,6 +721,51 @@ export class MafiaGameEngine extends EventEmitter {
     this.gameState.gameHistory.push(event);
     this.emit(type, data);
     this.emit("game_event", event);
+  }
+
+  // 🔧 FIXED: Sanitize event data to prevent circular references
+  private sanitizeEventData(data: any): any {
+    if (!data) return data;
+
+    try {
+      // Simple deep clone that breaks circular references
+      return JSON.parse(
+        JSON.stringify(data, (key, value) => {
+          // Convert dates to strings
+          if (value instanceof Date) {
+            return value.toISOString();
+          }
+          // Skip circular references
+          if (typeof value === "object" && value !== null) {
+            if (this.hasCircularReference(value)) {
+              return "[Circular Reference Removed]";
+            }
+          }
+          return value;
+        })
+      );
+    } catch (error) {
+      console.warn("Event data sanitization failed:", error);
+      return { error: "Data could not be serialized" };
+    }
+  }
+
+  // Helper to detect circular references
+  private hasCircularReference(obj: any, seen = new WeakSet()): boolean {
+    if (obj && typeof obj === "object") {
+      if (seen.has(obj)) return true;
+      seen.add(obj);
+
+      for (const key in obj) {
+        if (
+          obj.hasOwnProperty(key) &&
+          this.hasCircularReference(obj[key], seen)
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   // Public API

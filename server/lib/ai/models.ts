@@ -1,4 +1,4 @@
-// AI Model Integration for AI Mafia
+// AI Model Integration for AI Mafia - Enhanced with Elimination Awareness
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -197,6 +197,7 @@ export class AIModelManager {
     ];
   }
 
+  // 🆕 ENHANCED: System prompt with elimination awareness
   private buildSystemPrompt(request: AIActionRequest): string {
     const personality = request.personality;
     const role = request.context.role;
@@ -221,30 +222,74 @@ ${this.getRoleDescription(role)}
 CURRENT PHASE: ${phase}
 ${this.getPhaseDescription(phase)}
 
-IMPORTANT RULES:
-1. Stay in character at all times
-2. Never reveal you are an AI
-3. Keep responses natural and human-like
-4. ${
+🛡️ CRITICAL GAME RULES:
+1. Only LIVING players can speak, vote, and take actions
+2. Eliminated players are permanently out of the game
+3. When players are eliminated, their roles are revealed to everyone
+4. Use role reveal information strategically in your decisions
+5. React naturally to surprising role reveals
+6. Stay in character at all times - never reveal you are an AI
+7. Keep responses natural and human-like
+8. ${
       request.constraints.maxLength
         ? `Keep responses under ${request.constraints.maxLength} characters`
         : "Keep responses concise but meaningful"
     }
-5. Show appropriate emotions and reactions
-6. Make decisions that align with your personality and role objectives`;
+9. Show appropriate emotions and reactions
+10. Make decisions that align with your personality and role objectives`;
+
+    // 🆕 Add current player status awareness
+    if (request.context.playerStatus) {
+      basePrompt += `\n\nCURRENT PLAYER STATUS:
+LIVING: ${request.context.playerStatus.living.map((p) => p.name).join(", ")}`;
+
+      if (request.context.playerStatus.eliminated.length > 0) {
+        basePrompt += `\nELIMINATED: ${request.context.playerStatus.eliminated
+          .map((p) => `${p.name} (${p.role})`)
+          .join(", ")}`;
+      }
+    }
+
+    // 🆕 Add recent elimination awareness
+    if (request.context.latestElimination) {
+      const elim = request.context.latestElimination;
+      basePrompt += `\n\n💀 BREAKING NEWS - RECENT ELIMINATION:
+${elim.playerName} was just eliminated and revealed as ${elim.role}!`;
+
+      if (elim.cause === "voted_out") {
+        basePrompt += `\nThey were voted out with ${elim.voteCount} votes.`;
+      } else if (elim.cause === "mafia_kill") {
+        basePrompt += `\nThey were killed by the mafia during the night.`;
+      }
+
+      basePrompt += `\nReact to this information appropriately and consider what it means for the game.`;
+    }
 
     if (role === PlayerRole.MAFIA_LEADER || role === PlayerRole.MAFIA_MEMBER) {
       basePrompt += `\n\nMAFIA OBJECTIVES:
 - Eliminate citizens without being detected
-- Coordinate with your mafia partner
+- Coordinate with your mafia partner (if still alive)
 - Deflect suspicion onto innocent players
-- Maintain your cover identity`;
+- Maintain your cover identity
+- Use elimination information strategically`;
+
+      // Warn if mafia partner is dead
+      if (
+        request.context.playerStatus?.eliminated.some(
+          (p) =>
+            p.role === PlayerRole.MAFIA_LEADER ||
+            p.role === PlayerRole.MAFIA_MEMBER
+        )
+      ) {
+        basePrompt += `\n⚠️ WARNING: Your mafia partner has been eliminated! You're on your own now.`;
+      }
     }
 
     // 🛡️ SANITIZE BEFORE SENDING TO API
     return this.sanitizeForAPI(basePrompt);
   }
 
+  // 🆕 ENHANCED: User prompt with detailed elimination context
   private buildUserPrompt(request: AIActionRequest): string {
     const context = request.context;
 
@@ -254,8 +299,59 @@ Living Players: ${context.livingPlayers.length}
 Eliminated Players: ${context.eliminatedPlayers.length}
 Time Remaining: ${Math.floor(context.timeRemaining / 1000)} seconds
 
-RECENT GAME HISTORY:
-${context.gameHistory.slice(-5).join("\n")}`;
+🛡️ CURRENT PLAYER STATUS:`;
+
+    // Show current living and dead players with roles
+    if (context.playerStatus) {
+      prompt += `\nLIVING: ${context.playerStatus.living
+        .map((p) => p.name)
+        .join(", ")}`;
+
+      if (context.playerStatus.eliminated.length > 0) {
+        prompt += `\nELIMINATED: ${context.playerStatus.eliminated
+          .map((p) => `${p.name} (${p.role})`)
+          .join(", ")}`;
+      }
+    }
+
+    // 🆕 Recent elimination details
+    if (context.latestElimination) {
+      const elim = context.latestElimination;
+      prompt += `\n\n💀 LATEST ELIMINATION (Round ${elim.round}):`;
+
+      if (elim.cause === "voted_out") {
+        prompt += `\n${elim.playerName} was voted out with ${elim.voteCount} votes.`;
+      } else if (elim.cause === "mafia_kill") {
+        prompt += `\n${elim.playerName} was eliminated by the mafia during the night.`;
+      }
+
+      prompt += `\nRevealed role: ${elim.role}`;
+
+      // Strategic implications
+      if (elim.role === PlayerRole.HEALER) {
+        prompt += `\n⚠️ CRITICAL: The healer is dead - no more protections possible!`;
+      } else if (
+        elim.role === PlayerRole.MAFIA_LEADER ||
+        elim.role === PlayerRole.MAFIA_MEMBER
+      ) {
+        prompt += `\n🎯 GOOD NEWS: A mafia member was eliminated!`;
+      }
+    }
+
+    // 🆕 Full elimination history
+    if (context.eliminationHistory && context.eliminationHistory.length > 0) {
+      prompt += `\n\nELIMINATION SUMMARY:`;
+      context.eliminationHistory.forEach((elim) => {
+        const method = elim.cause === "voted_out" ? "Voted Out" : "Mafia Kill";
+        prompt += `\nRound ${elim.round}: ${elim.playerName} (${elim.role}) - ${method}`;
+      });
+    }
+
+    prompt += `\n\nRECENT GAME HISTORY (from living players only):
+${
+  context.gameHistory.slice(-5).join("\n") ||
+  "Game just started - no previous messages"
+}`;
 
     if (context.previousVotes.length > 0) {
       prompt += `\n\nPREVIOUS VOTING PATTERNS:
@@ -267,32 +363,54 @@ ${context.previousVotes
     switch (request.type) {
       case "discussion":
         prompt += `\n\nIt's your turn to speak in the discussion phase. What do you want to say to the group? Consider:
-- What you've observed about other players
+- React to any recent eliminations and role reveals
+- What you've observed about other living players
 - Who you find suspicious and why
-- Your theory about who the mafia might be
+- Your theory about who the remaining mafia might be
 - How to deflect suspicion from yourself (if you're mafia)
-- Building alliances or casting doubt`;
+- Building alliances or casting doubt strategically
+- The impact of revealed roles on game strategy
+
+Speak naturally as ${request.personality.name}:`;
         break;
 
       case "vote":
         prompt += `\n\nIt's time to vote for who you think should be eliminated. Consider:
 - All the evidence discussed this round
+- Role reveals from previous eliminations
 - Voting patterns from previous rounds
 - Your suspicions and reasoning
 - Strategic implications of your vote
         
-Who do you vote to eliminate and why? Format: "I vote to eliminate [PLAYER_NAME] because [REASONING]"`;
+Who do you vote to eliminate and why? 
+
+Available living players to vote for: ${
+          request.constraints.availableTargets?.join(", ") ||
+          "All living players except yourself"
+        }
+
+Format: "I vote to eliminate [PLAYER_NAME] because [REASONING]"`;
         break;
 
       case "night_action":
         if (context.role === PlayerRole.MAFIA_LEADER) {
           prompt += `\n\nAs the Mafia Leader, choose who to eliminate tonight. Consider:
 - Who poses the biggest threat to the mafia
-- Who might be the Healer
+- Who might be the Healer (if still alive)
 - Strategic timing and misdirection
-- Available targets: ${
+- Role information revealed from previous eliminations`;
+
+          // Check if healer is dead
+          const healerDead = context.playerStatus?.eliminated.some(
+            (p) => p.role === PlayerRole.HEALER
+          );
+          if (healerDead) {
+            prompt += `\n✅ ADVANTAGE: The healer is dead - no protections possible!`;
+          }
+
+          prompt += `\n\nAvailable targets: ${
             request.constraints.availableTargets?.join(", ") ||
-            "All living players"
+            "All living non-mafia players"
           }
           
 Who do you want to eliminate? Format: "I want to eliminate [PLAYER_NAME] tonight"`;
@@ -301,7 +419,9 @@ Who do you want to eliminate? Format: "I want to eliminate [PLAYER_NAME] tonight
 - Who is most likely to be targeted by mafia
 - Strategic value of different players
 - Whether to protect yourself or others
-- Available targets: ${
+- Information gained from recent eliminations
+
+Available targets: ${
             request.constraints.availableTargets?.join(", ") ||
             "All living players"
           }
@@ -413,6 +533,14 @@ Who do you want to protect? Format: "I want to protect [PLAYER_NAME] tonight"`;
     // Adjust based on information available
     if (request.context.gameHistory.length > 10) confidence += 0.1;
     if (request.context.round > 3) confidence += 0.1;
+
+    // Boost confidence if we have elimination data
+    if (
+      request.context.eliminationHistory &&
+      request.context.eliminationHistory.length > 0
+    ) {
+      confidence += 0.1;
+    }
 
     // Personality adjustments
     if (request.personality.archetype === "analytical_detective")

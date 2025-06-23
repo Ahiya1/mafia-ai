@@ -1,4 +1,4 @@
-// Fixed WebSocket Game Server for AI Mafia - Dashboard Event Broadcasting Fix
+// server/socket/game-server.ts - FIXED: Circular reference prevention in dashboard broadcasting
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
 import { MafiaGameEngine } from "../lib/game/engine";
@@ -23,8 +23,8 @@ export class GameSocketServer {
   private rooms: Map<RoomId, GameRoom> = new Map();
   private players: Map<PlayerId, PlayerConnection> = new Map();
   private aiManager: AIModelManager;
-  private dashboardSockets: Set<Socket> = new Set(); // Track dashboard connections
-  private aiActionTimeouts: Map<string, NodeJS.Timeout> = new Map(); // Track AI timeouts to prevent recursion
+  private dashboardSockets: Set<Socket> = new Set();
+  private aiActionTimeouts: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
@@ -71,7 +71,7 @@ export class GameSocketServer {
         // Send welcome message to dashboard
         socket.emit("dashboard_connected", {
           message: "Dashboard connected successfully",
-          timestamp: new Date(),
+          timestamp: new Date().toISOString(), // 🔧 FIXED: Convert Date to string
           totalRooms: this.rooms.size,
           totalPlayers: this.players.size,
         });
@@ -108,7 +108,7 @@ export class GameSocketServer {
         // 🔧 FIXED: Also broadcast heartbeat to dashboards for monitoring
         this.broadcastToDashboards("heartbeat_received", {
           socketId: socket.id,
-          timestamp: new Date(),
+          timestamp: new Date().toISOString(), // 🔧 FIXED: Convert Date to string
           isDashboard: this.dashboardSockets.has(socket),
         });
       });
@@ -117,6 +117,60 @@ export class GameSocketServer {
         this.handleDisconnect(socket);
       });
     });
+  }
+
+  // 🔧 FIXED: Sanitize data before sending to prevent circular references
+  private sanitizeForBroadcast(data: any): any {
+    if (!data) return data;
+
+    try {
+      return JSON.parse(
+        JSON.stringify(data, (key, value) => {
+          // Convert dates to strings
+          if (value instanceof Date) {
+            return value.toISOString();
+          }
+
+          // Handle Maps by converting to objects
+          if (value instanceof Map) {
+            return Object.fromEntries(value);
+          }
+
+          // Skip functions and undefined
+          if (typeof value === "function" || value === undefined) {
+            return null;
+          }
+
+          // Handle circular references
+          if (typeof value === "object" && value !== null) {
+            // Simple circular reference detection
+            if (value.__circularRefDetected) {
+              return "[Circular Reference]";
+            }
+
+            // Mark object to detect circular refs
+            if (typeof value === "object" && value.constructor === Object) {
+              try {
+                JSON.stringify(value);
+              } catch (e) {
+                if (e.message.includes("circular")) {
+                  return "[Circular Reference Removed]";
+                }
+              }
+            }
+          }
+
+          return value;
+        })
+      );
+    } catch (error) {
+      console.warn("⚠️ Data sanitization failed:", error.message);
+      return {
+        error: "Data could not be serialized",
+        originalType: typeof data,
+        timestamp: new Date().toISOString(),
+      };
+    }
   }
 
   private handleJoinRoom(
@@ -132,12 +186,15 @@ export class GameSocketServer {
       });
 
       // 🔧 FIXED: Broadcast error to dashboards for debugging
-      this.broadcastToDashboards("join_room_error", {
-        roomCode: data.roomCode,
-        playerName: data.playerName,
-        error: "Room not found",
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "join_room_error",
+        this.sanitizeForBroadcast({
+          roomCode: data.roomCode,
+          playerName: data.playerName,
+          error: "Room not found",
+          timestamp: new Date().toISOString(),
+        })
+      );
       return;
     }
 
@@ -183,19 +240,22 @@ export class GameSocketServer {
     socket.emit("room_joined", {
       roomId: room.id,
       playerId,
-      roomCode: data.roomCode, // 🔧 FIXED: Include room code in response
+      roomCode: data.roomCode,
       roomInfo: this.getRoomInfo(room),
       players: Array.from(room.players.values()),
     });
 
     // 🔧 FIXED: Enhanced broadcasting to both room AND dashboards
     this.broadcastToRoom(room.id, "player_joined", { player });
-    this.broadcastToDashboards("player_joined", {
-      player,
-      roomCode: data.roomCode,
-      roomId: room.id,
-      timestamp: new Date(),
-    });
+    this.broadcastToDashboards(
+      "player_joined",
+      this.sanitizeForBroadcast({
+        player,
+        roomCode: data.roomCode,
+        roomId: room.id,
+        timestamp: new Date().toISOString(),
+      })
+    );
 
     console.log(`✅ Player ${data.playerName} joined room ${data.roomCode}`);
   }
@@ -268,15 +328,18 @@ export class GameSocketServer {
     });
 
     // 🔧 FIXED: Enhanced dashboard broadcasting with more details
-    this.broadcastToDashboards("room_created", {
-      roomCode,
-      roomId,
-      playerId,
-      playerName: data.playerName,
-      playerCount: room.players.size,
-      maxPlayers: room.config.maxPlayers,
-      timestamp: new Date(),
-    });
+    this.broadcastToDashboards(
+      "room_created",
+      this.sanitizeForBroadcast({
+        roomCode,
+        roomId,
+        playerId,
+        playerName: data.playerName,
+        playerCount: room.players.size,
+        maxPlayers: room.config.maxPlayers,
+        timestamp: new Date().toISOString(),
+      })
+    );
 
     console.log(`🏠 Room created: ${roomCode} by ${data.playerName}`);
   }
@@ -334,16 +397,19 @@ export class GameSocketServer {
       });
 
       // 🔧 FIXED: Broadcast AI player addition to dashboards
-      this.broadcastToDashboards("ai_players_added", {
-        roomCode: room.code,
-        aiCount: room.config.aiCount,
-        totalPlayers: room.players.size,
-        personalities: personalities.map((p) => ({
-          name: p.name,
-          model: p.model,
-        })),
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "ai_players_added",
+        this.sanitizeForBroadcast({
+          roomCode: room.code,
+          aiCount: room.config.aiCount,
+          totalPlayers: room.players.size,
+          personalities: personalities.map((p) => ({
+            name: p.name,
+            model: p.model,
+          })),
+          timestamp: new Date().toISOString(),
+        })
+      );
     } catch (error) {
       console.error("❌ Error filling room with AI players:", error);
     }
@@ -359,12 +425,15 @@ export class GameSocketServer {
     if (!room || !room.gameEngine) return;
 
     // 🔧 FIXED: Broadcast all game actions to dashboards
-    this.broadcastToDashboards("game_action_received", {
-      action: action.type,
-      playerId: action.playerId || connection.playerId,
-      roomCode: room.code,
-      timestamp: new Date(),
-    });
+    this.broadcastToDashboards(
+      "game_action_received",
+      this.sanitizeForBroadcast({
+        action: action.type,
+        playerId: action.playerId || connection.playerId,
+        roomCode: room.code,
+        timestamp: new Date().toISOString(),
+      })
+    );
 
     switch (action.type) {
       case "START_GAME":
@@ -409,18 +478,21 @@ export class GameSocketServer {
     const success = room.gameEngine.startGame();
     if (success) {
       this.broadcastToRoom(room.id, "game_started", {
-        gameState: room.gameEngine.getGameState(),
+        gameState: room.gameEngine.getSerializableGameState(), // 🔧 FIXED: Use serializable version
       });
 
       // 🔧 FIXED: Enhanced dashboard broadcasting
-      this.broadcastToDashboards("game_started", {
-        roomCode: room.code,
-        roomId: room.id,
-        hostId: playerId,
-        playerCount: room.players.size,
-        aiCount: room.config.aiCount,
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "game_started",
+        this.sanitizeForBroadcast({
+          roomCode: room.code,
+          roomId: room.id,
+          hostId: playerId,
+          playerCount: room.players.size,
+          aiCount: room.config.aiCount,
+          timestamp: new Date().toISOString(),
+        })
+      );
 
       // 🔧 FIXED: Start AI automation safely without recursion
       this.startAIAutomationSafely(room);
@@ -431,31 +503,39 @@ export class GameSocketServer {
     const engine = room.gameEngine!;
 
     engine.on("game_event", (event: any) => {
-      this.broadcastToRoom(room.id, "game_event", event);
+      const sanitizedEvent = this.sanitizeForBroadcast(event);
+      this.broadcastToRoom(room.id, "game_event", sanitizedEvent);
 
       // 🔧 FIXED: Enhanced dashboard broadcasting for game events
-      this.broadcastToDashboards("game_event", {
-        ...event,
-        roomCode: room.code,
-        roomId: room.id,
-        playerCount: room.players.size,
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "game_event",
+        this.sanitizeForBroadcast({
+          ...sanitizedEvent,
+          roomCode: room.code,
+          roomId: room.id,
+          playerCount: room.players.size,
+          timestamp: new Date().toISOString(),
+        })
+      );
     });
 
     engine.on(
       "phase_changed",
       (data: { newPhase: string; oldPhase: string; round: number }) => {
-        this.broadcastToRoom(room.id, "phase_changed", data);
+        const sanitizedData = this.sanitizeForBroadcast(data);
+        this.broadcastToRoom(room.id, "phase_changed", sanitizedData);
 
         // 🔧 FIXED: Enhanced phase change broadcasting
-        this.broadcastToDashboards("phase_changed", {
-          ...data,
-          roomCode: room.code,
-          roomId: room.id,
-          playerCount: room.players.size,
-          timestamp: new Date(),
-        });
+        this.broadcastToDashboards(
+          "phase_changed",
+          this.sanitizeForBroadcast({
+            ...sanitizedData,
+            roomCode: room.code,
+            roomId: room.id,
+            playerCount: room.players.size,
+            timestamp: new Date().toISOString(),
+          })
+        );
 
         // 🔧 FIXED: Safe AI phase transition without recursion
         this.handleAIPhaseTransitionSafely(room, data.newPhase);
@@ -463,32 +543,40 @@ export class GameSocketServer {
     );
 
     engine.on("player_eliminated", (data: any) => {
-      this.broadcastToRoom(room.id, "player_eliminated", data);
+      const sanitizedData = this.sanitizeForBroadcast(data);
+      this.broadcastToRoom(room.id, "player_eliminated", sanitizedData);
 
       // 🔧 FIXED: Enhanced elimination broadcasting
-      this.broadcastToDashboards("player_eliminated", {
-        ...data,
-        roomCode: room.code,
-        roomId: room.id,
-        remainingPlayers: Array.from(room.players.values()).filter(
-          (p) => p.isAlive
-        ).length,
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "player_eliminated",
+        this.sanitizeForBroadcast({
+          ...sanitizedData,
+          roomCode: room.code,
+          roomId: room.id,
+          remainingPlayers: Array.from(room.players.values()).filter(
+            (p) => p.isAlive
+          ).length,
+          timestamp: new Date().toISOString(),
+        })
+      );
     });
 
     engine.on("game_ended", (data: any) => {
-      this.broadcastToRoom(room.id, "game_ended", data);
+      const sanitizedData = this.sanitizeForBroadcast(data);
+      this.broadcastToRoom(room.id, "game_ended", sanitizedData);
 
       // 🔧 FIXED: Enhanced game end broadcasting
-      this.broadcastToDashboards("game_ended", {
-        ...data,
-        roomCode: room.code,
-        roomId: room.id,
-        duration: data.stats?.gameDuration || 0,
-        totalRounds: data.stats?.totalRounds || 0,
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "game_ended",
+        this.sanitizeForBroadcast({
+          ...sanitizedData,
+          roomCode: room.code,
+          roomId: room.id,
+          duration: data.stats?.gameDuration || 0,
+          totalRounds: data.stats?.totalRounds || 0,
+          timestamp: new Date().toISOString(),
+        })
+      );
 
       this.cleanupGame(room);
     });
@@ -521,9 +609,21 @@ export class GameSocketServer {
     if (dashboardCount > 0) {
       console.log(`📊 Broadcasting ${event} to ${dashboardCount} dashboards`);
 
+      // 🔧 FIXED: Sanitize data before broadcasting
+      const sanitizedData = this.sanitizeForBroadcast(data);
+
       this.dashboardSockets.forEach((socket) => {
         if (socket.connected) {
-          socket.emit(event, data);
+          try {
+            socket.emit(event, sanitizedData);
+          } catch (error) {
+            console.warn(
+              `⚠️ Failed to emit ${event} to dashboard:`,
+              error.message
+            );
+            // Remove problematic socket
+            this.dashboardSockets.delete(socket);
+          }
         } else {
           // Remove disconnected sockets
           this.dashboardSockets.delete(socket);
@@ -537,17 +637,17 @@ export class GameSocketServer {
       const stats = this.getRoomStats();
       const aiStats = this.getAIUsageStats();
 
-      const statsData = {
+      const statsData = this.sanitizeForBroadcast({
         rooms: stats,
         ai: Array.from(aiStats.entries()),
         server: {
           uptime: process.uptime(),
           memoryUsage: process.memoryUsage(),
-          timestamp: new Date().toISOString(),
+          timestamp: new Date().toISOString(), // 🔧 FIXED: Convert Date to string
           dashboardConnections: this.dashboardSockets.size,
           activeConnections: this.players.size,
         },
-      };
+      });
 
       this.broadcastToDashboards("stats_update", statsData);
     }
@@ -557,19 +657,23 @@ export class GameSocketServer {
     const stats = this.getRoomStats();
     const aiStats = this.getAIUsageStats();
 
-    const statsData = {
+    const statsData = this.sanitizeForBroadcast({
       rooms: stats,
       ai: Array.from(aiStats.entries()),
       server: {
         uptime: process.uptime(),
         memoryUsage: process.memoryUsage(),
-        timestamp: new Date().toISOString(),
+        timestamp: new Date().toISOString(), // 🔧 FIXED: Convert Date to string
         dashboardConnections: this.dashboardSockets.size,
         activeConnections: this.players.size,
       },
-    };
+    });
 
-    socket.emit("stats_update", statsData);
+    try {
+      socket.emit("stats_update", statsData);
+    } catch (error) {
+      console.warn("⚠️ Failed to send stats to socket:", error.message);
+    }
   }
 
   // 🔧 FIXED: Safe AI automation that prevents recursion
@@ -577,11 +681,14 @@ export class GameSocketServer {
     console.log(`🤖 AI automation started for room ${room.code}`);
 
     // Broadcast AI automation start to dashboards
-    this.broadcastToDashboards("ai_automation_started", {
-      roomCode: room.code,
-      aiCount: room.config.aiCount,
-      timestamp: new Date(),
-    });
+    this.broadcastToDashboards(
+      "ai_automation_started",
+      this.sanitizeForBroadcast({
+        roomCode: room.code,
+        aiCount: room.config.aiCount,
+        timestamp: new Date().toISOString(),
+      })
+    );
   }
 
   // 🔧 FIXED: Safe phase transition handling
@@ -829,13 +936,16 @@ export class GameSocketServer {
     content: string
   ): void {
     if (room.gameEngine?.sendMessage(playerId, content)) {
-      this.broadcastToDashboards("message_received", {
-        playerId,
-        playerName: room.players.get(playerId)?.name,
-        content,
-        roomCode: room.code,
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "message_received",
+        this.sanitizeForBroadcast({
+          playerId,
+          playerName: room.players.get(playerId)?.name,
+          content,
+          roomCode: room.code,
+          timestamp: new Date().toISOString(),
+        })
+      );
     }
   }
 
@@ -846,15 +956,18 @@ export class GameSocketServer {
     reasoning: string
   ): void {
     if (room.gameEngine?.castVote(playerId, targetId, reasoning)) {
-      this.broadcastToDashboards("vote_cast", {
-        voterId: playerId,
-        voterName: room.players.get(playerId)?.name,
-        targetId,
-        targetName: room.players.get(targetId)?.name,
-        reasoning,
-        roomCode: room.code,
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "vote_cast",
+        this.sanitizeForBroadcast({
+          voterId: playerId,
+          voterName: room.players.get(playerId)?.name,
+          targetId,
+          targetName: room.players.get(targetId)?.name,
+          reasoning,
+          roomCode: room.code,
+          timestamp: new Date().toISOString(),
+        })
+      );
     }
   }
 
@@ -865,15 +978,18 @@ export class GameSocketServer {
     targetId?: PlayerId
   ): void {
     if (room.gameEngine?.nightAction(playerId, action, targetId)) {
-      this.broadcastToDashboards("night_action", {
-        playerId,
-        playerName: room.players.get(playerId)?.name,
-        action,
-        targetId,
-        targetName: targetId ? room.players.get(targetId)?.name : undefined,
-        roomCode: room.code,
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "night_action",
+        this.sanitizeForBroadcast({
+          playerId,
+          playerName: room.players.get(playerId)?.name,
+          action,
+          targetId,
+          targetName: targetId ? room.players.get(targetId)?.name : undefined,
+          roomCode: room.code,
+          timestamp: new Date().toISOString(),
+        })
+      );
     }
   }
 
@@ -896,12 +1012,15 @@ export class GameSocketServer {
       this.broadcastToRoom(room.id, "player_ready", { playerId });
 
       // 🔧 FIXED: Broadcast ready status to dashboards
-      this.broadcastToDashboards("player_ready", {
-        playerId,
-        playerName: player.name,
-        roomCode: room.code,
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "player_ready",
+        this.sanitizeForBroadcast({
+          playerId,
+          playerName: player.name,
+          roomCode: room.code,
+          timestamp: new Date().toISOString(),
+        })
+      );
     }
   }
 
@@ -913,11 +1032,14 @@ export class GameSocketServer {
     if (wasDashboard) {
       console.log(`📊 Dashboard disconnected: ${socket.id}`);
       // Broadcast dashboard disconnect to remaining dashboards
-      this.broadcastToDashboards("dashboard_disconnected", {
-        socketId: socket.id,
-        remainingDashboards: this.dashboardSockets.size,
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "dashboard_disconnected",
+        this.sanitizeForBroadcast({
+          socketId: socket.id,
+          remainingDashboards: this.dashboardSockets.size,
+          timestamp: new Date().toISOString(),
+        })
+      );
       return;
     }
 
@@ -935,20 +1057,26 @@ export class GameSocketServer {
         playerId: connection.playerId,
       });
 
-      this.broadcastToDashboards("player_left", {
-        playerId: connection.playerId,
-        roomCode: room.code,
-        remainingPlayers: room.players.size,
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "player_left",
+        this.sanitizeForBroadcast({
+          playerId: connection.playerId,
+          roomCode: room.code,
+          remainingPlayers: room.players.size,
+          timestamp: new Date().toISOString(),
+        })
+      );
 
       if (room.players.size === 0) {
         this.rooms.delete(room.id);
-        this.broadcastToDashboards("room_deleted", {
-          roomCode: room.code,
-          reason: "No players remaining",
-          timestamp: new Date(),
-        });
+        this.broadcastToDashboards(
+          "room_deleted",
+          this.sanitizeForBroadcast({
+            roomCode: room.code,
+            reason: "No players remaining",
+            timestamp: new Date().toISOString(),
+          })
+        );
       }
     }
 
@@ -989,7 +1117,12 @@ export class GameSocketServer {
 
   // 🔧 FIXED: Separate broadcast methods
   private broadcastToRoom(roomId: RoomId, event: string, data: any): void {
-    this.io.to(roomId).emit(event, data);
+    try {
+      const sanitizedData = this.sanitizeForBroadcast(data);
+      this.io.to(roomId).emit(event, sanitizedData);
+    } catch (error) {
+      console.warn(`⚠️ Failed to broadcast to room ${roomId}:`, error.message);
+    }
   }
 
   private findRoomByCode(code: string): GameRoom | undefined {
@@ -1001,14 +1134,14 @@ export class GameSocketServer {
   }
 
   private getRoomInfo(room: GameRoom): any {
-    return {
+    return this.sanitizeForBroadcast({
       id: room.id,
       code: room.code,
       playerCount: room.players.size,
       maxPlayers: room.config.maxPlayers,
       gameInProgress: !!room.gameEngine,
-      createdAt: room.createdAt,
-    };
+      createdAt: room.createdAt.toISOString(), // 🔧 FIXED: Convert Date to string
+    });
   }
 
   // Public API Methods
@@ -1080,16 +1213,19 @@ export class GameSocketServer {
       this.startAIAutomationSafely(room);
 
       // 🔧 FIXED: Enhanced AI-only game broadcasting
-      this.broadcastToDashboards("ai_only_game_created", {
-        roomCode,
-        roomId,
-        aiCount: room.config.aiCount,
-        personalities: Array.from(room.players.values()).map((p) => ({
-          name: p.name,
-          model: p.model,
-        })),
-        timestamp: new Date(),
-      });
+      this.broadcastToDashboards(
+        "ai_only_game_created",
+        this.sanitizeForBroadcast({
+          roomCode,
+          roomId,
+          aiCount: room.config.aiCount,
+          personalities: Array.from(room.players.values()).map((p) => ({
+            name: p.name,
+            model: p.model,
+          })),
+          timestamp: new Date().toISOString(),
+        })
+      );
     }, 2000);
 
     return this.getRoomInfo(room);
