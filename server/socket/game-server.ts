@@ -1,4 +1,4 @@
-// server/socket/game-server.ts - FIXED: Circular reference prevention in dashboard broadcasting
+// server/socket/game-server.ts - FIXED: Error handling and circular reference prevention
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
 import { MafiaGameEngine } from "../lib/game/engine";
@@ -153,7 +153,8 @@ export class GameSocketServer {
               try {
                 JSON.stringify(value);
               } catch (e) {
-                if (e.message.includes("circular")) {
+                // 🔧 FIXED: Proper error type checking
+                if (e instanceof Error && e.message.includes("circular")) {
                   return "[Circular Reference Removed]";
                 }
               }
@@ -164,7 +165,10 @@ export class GameSocketServer {
         })
       );
     } catch (error) {
-      console.warn("⚠️ Data sanitization failed:", error.message);
+      // 🔧 FIXED: Proper error type checking
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.warn("⚠️ Data sanitization failed:", errorMessage);
       return {
         error: "Data could not be serialized",
         originalType: typeof data,
@@ -411,7 +415,10 @@ export class GameSocketServer {
         })
       );
     } catch (error) {
-      console.error("❌ Error filling room with AI players:", error);
+      // 🔧 FIXED: Proper error type checking
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error("❌ Error filling room with AI players:", errorMessage);
     }
   }
 
@@ -617,9 +624,12 @@ export class GameSocketServer {
           try {
             socket.emit(event, sanitizedData);
           } catch (error) {
+            // 🔧 FIXED: Proper error type checking
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
             console.warn(
               `⚠️ Failed to emit ${event} to dashboard:`,
-              error.message
+              errorMessage
             );
             // Remove problematic socket
             this.dashboardSockets.delete(socket);
@@ -672,7 +682,10 @@ export class GameSocketServer {
     try {
       socket.emit("stats_update", statsData);
     } catch (error) {
-      console.warn("⚠️ Failed to send stats to socket:", error.message);
+      // 🔧 FIXED: Proper error type checking
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.warn("⚠️ Failed to send stats to socket:", errorMessage);
     }
   }
 
@@ -1121,7 +1134,10 @@ export class GameSocketServer {
       const sanitizedData = this.sanitizeForBroadcast(data);
       this.io.to(roomId).emit(event, sanitizedData);
     } catch (error) {
-      console.warn(`⚠️ Failed to broadcast to room ${roomId}:`, error.message);
+      // 🔧 FIXED: Proper error type checking
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.warn(`⚠️ Failed to broadcast to room ${roomId}:`, errorMessage);
     }
   }
 
