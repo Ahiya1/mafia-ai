@@ -4,7 +4,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
   AIResponse,
-  AIDecisionContext,
   AIActionRequest,
   AIPersonality,
   MODEL_CONFIGS,
@@ -32,7 +31,7 @@ export class AIModelManager {
     this.googleAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
 
     // Initialize usage stats for all models
-    Object.values(AIModel).forEach(model => {
+    Object.values(AIModel).forEach((model) => {
       this.usageStats.set(model, {
         totalRequests: 0,
         totalTokens: 0,
@@ -98,7 +97,7 @@ export class AIModelManager {
         `AI response generation failed for ${request.personality.name} (${request.personality.model}):`,
         error
       );
-      
+
       this.updateUsageStats(
         request.personality.model,
         0,
@@ -209,13 +208,17 @@ export class AIModelManager {
 
     let basePrompt = `You are ${personality.name}, playing in a Mafia game. 
 
-CRITICAL: You are a human player, NOT an AI. Never mention AI, algorithms, or being generated. Respond naturally as ${personality.name} would.
+CRITICAL: You are a human player, NOT an AI. Never mention AI, algorithms, or being generated. Respond naturally as ${
+      personality.name
+    } would.
 
 YOUR PERSONALITY:
-- You have a ${personality.archetype.replace('_', ' ')} approach to games
+- You have a ${personality.archetype.replace("_", " ")} approach to games
 - Communication: ${this.describeCommunicationStyle(personality)}
 - Strategy: ${this.describeStrategicApproach(personality)}
-- Suspicion Level: ${personality.suspicionLevel}/10 (how suspicious you are of others)
+- Suspicion Level: ${
+      personality.suspicionLevel
+    }/10 (how suspicious you are of others)
 - Trust Level: ${personality.trustLevel}/10 (how much you trust others)
 - Aggressiveness: ${personality.aggressiveness}/10 (how boldly you play)
 
@@ -258,13 +261,16 @@ Eliminated Players: ${context.eliminatedPlayers.length}
 Time Remaining: ${Math.floor(context.timeRemaining / 1000)} seconds
 
 RECENT CONVERSATION:
-${context.gameHistory.slice(-5).join("\n") || "Game just started - no previous messages"}`;
+${
+  context.gameHistory.slice(-5).join("\n") ||
+  "Game just started - no previous messages"
+}`;
 
     if (context.previousVotes.length > 0) {
       prompt += `\n\nPREVIOUS VOTING:
 ${context.previousVotes
-        .map((v) => `Round ${v.round}: ${v.votes.length} votes cast`)
-        .join("\n")}`;
+  .map((v) => `Round ${v.round}: ${v.votes.length} votes cast`)
+  .join("\n")}`;
     }
 
     switch (request.type) {
@@ -283,7 +289,8 @@ Speak naturally as ${request.personality.name}:`;
         prompt += `\n\nTime to vote! You must choose someone to eliminate. Consider everything that's been said and your suspicions.
 
 Available players to vote for: ${
-          request.constraints.availableTargets?.join(", ") || "All living players"
+          request.constraints.availableTargets?.join(", ") ||
+          "All living players"
         }
 
 Your vote (format: "I vote to eliminate [NAME] because [reason]"):`;
@@ -369,11 +376,21 @@ Your decision (format: "I choose to protect [NAME]"):`;
     // More creative/emotional personalities get higher temperature
     switch (personality.archetype) {
       case "creative_storyteller":
-        return 0.8 + (personality.communicationStyle.emotionalExpression === "high" ? 0.1 : 0);
+        return (
+          0.8 +
+          (personality.communicationStyle.emotionalExpression === "high"
+            ? 0.1
+            : 0)
+        );
       case "analytical_detective":
         return 0.4 + (personality.aggressiveness > 7 ? 0.2 : 0);
       case "direct_analyst":
-        return 0.6 + (personality.strategicApproach.riskTolerance === "aggressive" ? 0.1 : 0);
+        return (
+          0.6 +
+          (personality.strategicApproach.riskTolerance === "aggressive"
+            ? 0.1
+            : 0)
+        );
       default:
         return 0.7;
     }

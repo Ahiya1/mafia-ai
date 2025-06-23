@@ -318,7 +318,7 @@ test_ai_models() {
     
     # Create AI model test
     cat > ai_test.js << 'EOF'
-const { AIModelManager } = require('./dist/lib/ai/models');
+const { AIModelManager } = require('./dist/server/lib/ai/models');
 
 async function testAIModels() {
     try {

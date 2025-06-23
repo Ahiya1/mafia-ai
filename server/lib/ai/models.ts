@@ -4,7 +4,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
   AIResponse,
-  AIDecisionContext,
   AIActionRequest,
   AIPersonality,
   MODEL_CONFIGS,
@@ -29,6 +28,24 @@ export class AIModelManager {
     });
 
     this.googleAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
+  }
+
+  // 🛡️ UNICODE SANITIZATION - Fixes JSON encoding errors!
+  private sanitizeForAPI(text: string): string {
+    if (!text) return "";
+
+    return (
+      text
+        // Remove control characters (0x00-0x1F and 0x7F-0x9F)
+        .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
+        // Remove unpaired surrogate characters (THE MAIN FIX!)
+        .replace(/[\uD800-\uDFFF]/g, "")
+        // Remove other problematic Unicode characters
+        .replace(/[\uFEFF\uFFFE\uFFFF]/g, "")
+        // Normalize whitespace
+        .replace(/\s+/g, " ")
+        .trim()
+    );
   }
 
   async generateResponse(request: AIActionRequest): Promise<AIResponse> {
@@ -224,7 +241,8 @@ IMPORTANT RULES:
 - Maintain your cover identity`;
     }
 
-    return basePrompt;
+    // 🛡️ SANITIZE BEFORE SENDING TO API
+    return this.sanitizeForAPI(basePrompt);
   }
 
   private buildUserPrompt(request: AIActionRequest): string {
@@ -293,7 +311,8 @@ Who do you want to protect? Format: "I want to protect [PLAYER_NAME] tonight"`;
         break;
     }
 
-    return prompt;
+    // 🛡️ SANITIZE BEFORE SENDING TO API
+    return this.sanitizeForAPI(prompt);
   }
 
   private buildGooglePrompt(request: AIActionRequest): string {
@@ -383,7 +402,8 @@ Who do you want to protect? Format: "I want to protect [PLAYER_NAME] tonight"`;
       }
     }
 
-    return sanitized.trim();
+    // 🛡️ FINAL SANITIZATION
+    return this.sanitizeForAPI(sanitized);
   }
 
   private calculateConfidence(request: AIActionRequest): number {

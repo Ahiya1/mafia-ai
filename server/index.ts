@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import { GameSocketServer } from "./socket/game-server";
 
 // Load environment variables
-dotenv.config();
+dotenv.config({ path: ".env.local", override: true });
 
 const app = express();
 const httpServer = createServer(app);
