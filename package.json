@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:next\" \"npm run dev:server\"",
-    "dev:next": "next dev --turbo",
+    "dev:next": "next dev",
     "dev:server": "tsx watch server/index.ts",
     "server:dev": "tsx watch server/index.ts",
     "build": "next build && npm run build:server",
@@ -15,7 +15,7 @@
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "test:server": "chmod +x test-server.sh && ./test-server.sh",
-    "setup": "npm install && npm run type-check"
+    "setup": "chmod +x start-dev.sh && ./start-dev.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",

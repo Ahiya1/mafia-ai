@@ -1,0 +1,686 @@
+/* src/app/globals.css - Tailwind v4 Configuration for AI Mafia */
+@import "tailwindcss";
+
+/* Detective Theme Base Styles */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-feature-settings: "rlig" 1, "calt" 1;
+    overflow-x: hidden;
+  }
+
+  /* Custom scrollbar for detective theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background-color: rgb(17 17 17);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: rgb(37 99 235);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(59 130 246);
+  }
+
+  /* Focus styles for accessibility */
+  :focus-visible {
+    outline: none;
+    ring: 2px solid rgb(249 115 22);
+    ring-offset: 2px;
+    ring-offset-color: rgb(10 10 10);
+  }
+}
+
+/* Detective Theme Components */
+@layer components {
+  /* Detective Card - Primary container component */
+  .detective-card {
+    background-color: rgb(38 38 38);
+    border: 1px solid rgb(64 64 64);
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1),
+      0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    backdrop-filter: blur(8px);
+  }
+
+  .detective-card:hover {
+    border-color: rgb(37 99 235);
+    transition: border-color 0.2s;
+  }
+
+  /* Button variants */
+  .btn-detective {
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    transition: all 0.2s;
+    outline: none;
+    ring: 2px solid transparent;
+  }
+
+  .btn-detective:focus {
+    ring: 2px solid rgb(249 115 22);
+  }
+
+  .btn-primary {
+    background-color: rgb(37 99 235);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background-color: rgb(29 78 216);
+  }
+
+  .btn-secondary {
+    background-color: rgb(234 88 12);
+    color: white;
+  }
+
+  .btn-secondary:hover {
+    background-color: rgb(194 65 12);
+  }
+
+  .btn-danger {
+    background-color: rgb(220 38 38);
+    color: white;
+  }
+
+  .btn-danger:hover {
+    background-color: rgb(185 28 28);
+  }
+
+  /* Input styles */
+  .input-detective {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background-color: rgb(38 38 38);
+    border: 1px solid rgb(64 64 64);
+    border-radius: 0.5rem;
+    color: white;
+    transition: border-color 0.2s;
+  }
+
+  .input-detective::placeholder {
+    color: rgb(115 115 115);
+  }
+
+  .input-detective:focus {
+    border-color: rgb(59 130 246);
+    ring: 1px solid rgb(59 130 246);
+    outline: none;
+  }
+
+  /* Badge styles for roles and status */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.625rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+
+  .badge-mafia {
+    background-color: rgba(220, 38, 38, 0.2);
+    color: rgb(220 38 38);
+    border: 1px solid rgba(220, 38, 38, 0.3);
+  }
+
+  .badge-citizen {
+    background-color: rgba(59, 130, 246, 0.2);
+    color: rgb(59 130 246);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+  }
+
+  .badge-healer {
+    background-color: rgba(16, 185, 129, 0.2);
+    color: rgb(16 185 129);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+  }
+
+  /* Status indicators */
+  .status-online {
+    display: flex;
+    align-items: center;
+    color: rgb(34 197 94);
+  }
+
+  .status-offline {
+    display: flex;
+    align-items: center;
+    color: rgb(239 68 68);
+  }
+
+  .status-connecting {
+    display: flex;
+    align-items: center;
+    color: rgb(234 179 8);
+  }
+
+  /* Game elements */
+  .player-card {
+    background-color: rgb(38 38 38);
+    border: 1px solid rgb(64 64 64);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    transition: all 0.3s;
+  }
+
+  .player-card:hover {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+  }
+
+  .player-card.alive {
+    border-color: rgb(59 130 246);
+  }
+
+  .player-card.eliminated {
+    border-color: rgb(220 38 38);
+    background-color: rgb(17 17 17);
+    opacity: 0.75;
+  }
+
+  /* Message styles */
+  .message {
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    margin-bottom: 0.5rem;
+    animation: fadeIn 0.5s ease-in-out;
+  }
+
+  .message-system {
+    background-color: rgb(55 65 81);
+    border-left: 4px solid rgb(59 130 246);
+    color: rgb(191 219 254);
+  }
+
+  .message-player {
+    background-color: rgb(38 38 38);
+    border: 1px solid rgb(64 64 64);
+  }
+
+  /* Stats */
+  .stat-card {
+    background-color: rgb(38 38 38);
+    border: 1px solid rgb(64 64 64);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    text-align: center;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: rgb(249 115 22);
+  }
+
+  .stat-label {
+    font-size: 0.875rem;
+    color: rgb(163 163 163);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* Responsive utilities */
+  .container-detective {
+    max-width: 80rem;
+    margin: 0 auto;
+    padding: 0 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .container-detective {
+      padding: 0 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container-detective {
+      padding: 0 2rem;
+    }
+  }
+
+  /* Typography */
+  .heading-detective {
+    font-weight: bold;
+    color: rgb(249 115 22);
+    letter-spacing: -0.025em;
+  }
+
+  .text-detective-primary {
+    color: rgb(147 197 253);
+  }
+
+  .text-detective-secondary {
+    color: rgb(251 146 60);
+  }
+
+  .text-muted {
+    color: rgb(115 115 115);
+  }
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes detectiveBadge {
+  from {
+    transform: scale(0.9) rotate(-5deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1) rotate(2deg);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+/* Utility classes */
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+.animate-detective-badge {
+  animation: detectiveBadge 1s ease-in-out;
+}
+
+/* Responsive text utilities */
+.text-responsive-sm {
+  font-size: 0.875rem;
+}
+
+@media (min-width: 640px) {
+  .text-responsive-sm {
+    font-size: 1rem;
+  }
+}
+
+.text-responsive-base {
+  font-size: 1rem;
+}
+
+@media (min-width: 640px) {
+  .text-responsive-base {
+    font-size: 1.125rem;
+  }
+}
+
+/* Dark theme background */
+.bg-noir-black {
+  background-color: rgb(10 10 10);
+}
+
+.bg-noir-gradient {
+  background: linear-gradient(135deg, rgb(10 10 10) 0%, rgb(26 26 26) 100%);
+}
+
+/* Detective colors */
+.text-detective-orange-500 {
+  color: rgb(249 115 22);
+}
+
+.text-detective-blue-400 {
+  color: rgb(96 165 250);
+}
+
+.text-detective-blue-500 {
+  color: rgb(59 130 246);
+}
+
+.bg-detective-blue-600 {
+  background-color: rgb(37 99 235);
+}
+
+.bg-detective-blue-700 {
+  background-color: rgb(29 78 216);
+}
+
+.bg-detective-orange-600 {
+  background-color: rgb(234 88 12);
+}
+
+.bg-detective-orange-700 {
+  background-color: rgb(194 65 12);
+}
+
+.bg-detective-orange-500 {
+  background-color: rgb(249 115 22);
+}
+
+.text-green-500 {
+  color: rgb(34 197 94);
+}
+
+.text-red-500 {
+  color: rgb(239 68 68);
+}
+
+.text-yellow-500 {
+  color: rgb(234 179 8);
+}
+
+.text-gray-500 {
+  color: rgb(107 114 128);
+}
+
+.text-white {
+  color: rgb(255 255 255);
+}
+
+.bg-purple-600 {
+  background-color: rgb(147 51 234);
+}
+
+/* Grid utilities */
+.grid {
+  display: grid;
+}
+
+.grid-cols-1 {
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+.grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 768px) {
+  .md\\:grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .md\\:grid-cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .lg\\:grid-cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .lg\\:grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.gap-6 {
+  gap: 1.5rem;
+}
+
+.gap-4 {
+  gap: 1rem;
+}
+
+.gap-3 {
+  gap: 0.75rem;
+}
+
+.gap-2 {
+  gap: 0.5rem;
+}
+
+.gap-1 {
+  gap: 0.25rem;
+}
+
+/* Spacing */
+.p-6 {
+  padding: 1.5rem;
+}
+
+.p-4 {
+  padding: 1rem;
+}
+
+.p-3 {
+  padding: 0.75rem;
+}
+
+.p-2 {
+  padding: 0.5rem;
+}
+
+.px-4 {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.py-2 {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.px-2 {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.py-1 {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.px-3 {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.mb-6 {
+  margin-bottom: 1.5rem;
+}
+
+.mb-4 {
+  margin-bottom: 1rem;
+}
+
+.mb-3 {
+  margin-bottom: 0.75rem;
+}
+
+.mb-2 {
+  margin-bottom: 0.5rem;
+}
+
+.mt-4 {
+  margin-top: 1rem;
+}
+
+.mt-1 {
+  margin-top: 0.25rem;
+}
+
+.ml-2 {
+  margin-left: 0.5rem;
+}
+
+/* Flexbox */
+.flex {
+  display: flex;
+}
+
+.flex-col {
+  flex-direction: column;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.space-y-2 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.5rem;
+}
+
+.space-y-3 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.75rem;
+}
+
+.space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1rem;
+}
+
+/* Text */
+.text-lg {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.text-xl {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+
+.text-3xl {
+  font-size: 1.875rem;
+  line-height: 2.25rem;
+}
+
+.text-sm {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.text-xs {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.font-semibold {
+  font-weight: 600;
+}
+
+.font-medium {
+  font-weight: 500;
+}
+
+.font-bold {
+  font-weight: 700;
+}
+
+/* Layout */
+.min-h-screen {
+  min-height: 100vh;
+}
+
+.w-full {
+  width: 100%;
+}
+
+.max-h-32 {
+  max-height: 8rem;
+}
+
+.max-h-64 {
+  max-height: 16rem;
+}
+
+.overflow-y-auto {
+  overflow-y: auto;
+}
+
+/* Border */
+.border {
+  border-width: 1px;
+}
+
+.rounded {
+  border-radius: 0.25rem;
+}
+
+.rounded-lg {
+  border-radius: 0.5rem;
+}
+
+/* Position */
+.text-right {
+  text-align: right;
+}
+
+.text-center {
+  text-align: center;
+}
+
+/* Display */
+.block {
+  display: block;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hover effects */
+.hover\\:bg-detective-blue-700:hover {
+  background-color: rgb(29 78 216);
+}
+
+.hover\\:bg-detective-orange-700:hover {
+  background-color: rgb(194 65 12);
+}
+
+/* Transitions */
+.transition-colors {
+  transition-property: color, background-color, border-color,
+    text-decoration-color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none;
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-slide-up,
+  .animate-detective-badge {
+    animation: none;
+  }
+
+  .transition-colors {
+    transition: none;
+  }
+}
