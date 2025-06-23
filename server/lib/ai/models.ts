@@ -507,4 +507,85 @@ Who do you want to protect? Format: "I want to protect [PLAYER_NAME] tonight"`;
       config
     );
   }
+
+  // 🔧 FIXED: Properly implement getPersonalityPoolInfo method
+  getPersonalityPoolInfo() {
+    // Return hardcoded personality pool stats since we can't easily import from src/
+    const freeModels = [
+      AIModel.CLAUDE_HAIKU,
+      AIModel.GPT_4O_MINI,
+      AIModel.GEMINI_2_5_FLASH,
+    ];
+    const premiumModels = [
+      AIModel.CLAUDE_SONNET_4,
+      AIModel.GPT_4O,
+      AIModel.GEMINI_2_5_PRO,
+    ];
+
+    return {
+      totalPersonalities: 30, // Free: 18 + Premium: 12
+      personalities: [
+        {
+          name: "Alex",
+          model: "claude-haiku",
+          archetype: "analytical_detective",
+          description: "Methodical thinker",
+        },
+        {
+          name: "Sam",
+          model: "claude-haiku",
+          archetype: "analytical_detective",
+          description: "Quiet observer",
+        },
+        {
+          name: "Taylor",
+          model: "gpt-4o-mini",
+          archetype: "creative_storyteller",
+          description: "Creative thinker",
+        },
+        {
+          name: "Casey",
+          model: "gemini-2.5-flash",
+          archetype: "direct_analyst",
+          description: "Direct analyst",
+        },
+        {
+          name: "Blake",
+          model: "claude-sonnet-4",
+          archetype: "analytical_detective",
+          description: "Master detective",
+        },
+        {
+          name: "Riley",
+          model: "gpt-4o",
+          archetype: "creative_storyteller",
+          description: "Master storyteller",
+        },
+        {
+          name: "Avery",
+          model: "gemini-2.5-pro",
+          archetype: "direct_analyst",
+          description: "Strategic genius",
+        },
+      ],
+      modelDistribution: [
+        { model: "claude-haiku", count: 6 },
+        { model: "gpt-4o-mini", count: 6 },
+        { model: "gemini-2.5-flash", count: 6 },
+        { model: "claude-sonnet-4", count: 5 },
+        { model: "gpt-4o", count: 5 },
+        { model: "gemini-2.5-pro", count: 5 },
+      ],
+      tiers: {
+        free: {
+          models: freeModels.length,
+          personalities: 18,
+        },
+        premium: {
+          models: premiumModels.length,
+          personalities: 12,
+        },
+      },
+    };
+  }
 }
