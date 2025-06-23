@@ -150,13 +150,32 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Initialize database client with error handling
 let database: any = null;
 try {
-  // Only try to connect if we have database credentials
-  if (process.env.DATABASE_URL) {
-    // Placeholder for database connection
-    logger.info("✅ Database connection ready");
-    database = { connected: true };
+  // Check for Supabase credentials (preferred) or DATABASE_URL
+  if (
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  ) {
+    // Supabase connection available
+    logger.info("✅ Supabase database connection ready");
+    database = {
+      connected: true,
+      type: "supabase",
+      url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    };
+  } else if (process.env.DATABASE_URL) {
+    // PostgreSQL connection available
+    logger.info("✅ PostgreSQL database connection ready");
+    database = {
+      connected: true,
+      type: "postgresql",
+      url: process.env.DATABASE_URL,
+    };
   } else {
     logger.warn("⚠️  Database credentials not found - features disabled");
+    logger.info(
+      "💡 Add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY for Supabase"
+    );
+    logger.info("💡 Or add DATABASE_URL for PostgreSQL");
   }
 } catch (error) {
   logger.error("❌ Database initialization failed:", error);
@@ -189,7 +208,7 @@ app.get("/health", (_req: Request, res: Response) => {
     version: "2.0.0",
     phase: "Phase 2 - Railway Deployment",
     detective: "🕵️‍♂️ AI Mafia Server Online",
-    database: database ? "connected" : "disabled",
+    database: database ? `connected (${database.type})` : "disabled",
     websocket: "ready",
     environment: process.env.NODE_ENV || "development",
     port: PORT,
@@ -559,7 +578,9 @@ const startBackgroundTasks = () => {
 httpServer.listen(PORT, HOST as string, () => {
   logger.info(`🎮 AI Mafia Server running on ${HOST}:${PORT}`);
   logger.info(`🔌 WebSocket server: ready`);
-  logger.info(`🗄️  Database: ${database ? "connected" : "disabled"}`);
+  logger.info(
+    `🗄️  Database: ${database ? `connected (${database.type})` : "disabled"}`
+  );
   logger.info(`🤖 AI models: OpenAI, Anthropic, Google`);
   logger.info(`🎭 Detective AI personalities ready`);
   logger.info(
