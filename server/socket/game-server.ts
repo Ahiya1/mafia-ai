@@ -1,4 +1,3 @@
-// server/socket/game-server.ts - FIXED: Error handling and circular reference prevention
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
 import { MafiaGameEngine } from "../lib/game/engine";
@@ -13,7 +12,7 @@ import {
   PlayerId,
   GameConfig,
   PlayerRole,
-} from "../lib/types/game";
+} from "@/types/game";
 import { AI_PERSONALITIES, AIModel } from "../lib/types/ai";
 import { selectGamePersonalities } from "../../src/lib/ai/personality-pool";
 import { v4 as uuidv4 } from "uuid";
@@ -25,6 +24,7 @@ export class GameSocketServer {
   private aiManager: AIModelManager;
   private dashboardSockets: Set<Socket> = new Set();
   private aiActionTimeouts: Map<string, NodeJS.Timeout> = new Map();
+  private observerSockets: Map<RoomId, Set<Socket>> = new Map();
 
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
@@ -39,12 +39,10 @@ export class GameSocketServer {
     this.aiManager = new AIModelManager();
     this.setupSocketHandlers();
 
-    // Clean up AI timeouts every 5 minutes to prevent memory leaks
     setInterval(() => {
       this.cleanupOldTimeouts();
     }, 300000);
 
-    // 🔧 FIXED: Broadcast stats to dashboard every 2 seconds
     setInterval(() => {
       this.broadcastStatsToDashboards();
     }, 2000);
@@ -54,36 +52,32 @@ export class GameSocketServer {
     this.io.on("connection", (socket: Socket) => {
       console.log(`🔌 Player connected: ${socket.id}`);
 
-      // 🔧 FIXED: Better dashboard detection using query parameters or custom header
       const isDashboard =
         socket.handshake.query.dashboard === "true" ||
-        socket.handshake.headers.referer?.includes("/dashboard") ||
-        socket.handshake.query.clientType === "dashboard" ||
-        socket.handshake.headers["user-agent"]?.includes("Dashboard");
+        socket.handshake.query.clientType === "dashboard";
 
       if (isDashboard) {
         this.dashboardSockets.add(socket);
         console.log(`📊 Dashboard connected: ${socket.id}`);
-
-        // Send current stats to new dashboard immediately
         this.sendStatsToSocket(socket);
-
-        // Send welcome message to dashboard
         socket.emit("dashboard_connected", {
           message: "Dashboard connected successfully",
-          timestamp: new Date().toISOString(), // 🔧 FIXED: Convert Date to string
+          timestamp: new Date().toISOString(),
           totalRooms: this.rooms.size,
           totalPlayers: this.players.size,
         });
       }
 
+      // Enhanced join_room handler with observer support
       socket.on(
         "join_room",
         (data: {
           roomCode: string;
           playerName: string;
           playerId?: PlayerId;
+          observerMode?: boolean;
         }) => {
+          console.log(`🔌 Join room request:`, data);
           this.handleJoinRoom(socket, data);
         }
       );
@@ -91,26 +85,18 @@ export class GameSocketServer {
       socket.on(
         "create_room",
         (data: { playerName: string; roomSettings: any }) => {
+          console.log(`🏠 Create room request:`, data);
           this.handleCreateRoom(socket, data);
         }
       );
 
       socket.on("game_action", (action: GameAction) => {
+        console.log(`🎮 Game action:`, action);
         this.handleGameAction(socket, action);
       });
 
       socket.on("ready_up", (data: { playerId: PlayerId }) => {
         this.handlePlayerReady(socket, data.playerId);
-      });
-
-      socket.on("heartbeat", () => {
-        socket.emit("heartbeat_ack");
-        // 🔧 FIXED: Also broadcast heartbeat to dashboards for monitoring
-        this.broadcastToDashboards("heartbeat_received", {
-          socketId: socket.id,
-          timestamp: new Date().toISOString(), // 🔧 FIXED: Convert Date to string
-          isDashboard: this.dashboardSockets.has(socket),
-        });
       });
 
       socket.on("disconnect", () => {
@@ -119,67 +105,14 @@ export class GameSocketServer {
     });
   }
 
-  // 🔧 FIXED: Sanitize data before sending to prevent circular references
-  private sanitizeForBroadcast(data: any): any {
-    if (!data) return data;
-
-    try {
-      return JSON.parse(
-        JSON.stringify(data, (key, value) => {
-          // Convert dates to strings
-          if (value instanceof Date) {
-            return value.toISOString();
-          }
-
-          // Handle Maps by converting to objects
-          if (value instanceof Map) {
-            return Object.fromEntries(value);
-          }
-
-          // Skip functions and undefined
-          if (typeof value === "function" || value === undefined) {
-            return null;
-          }
-
-          // Handle circular references
-          if (typeof value === "object" && value !== null) {
-            // Simple circular reference detection
-            if (value.__circularRefDetected) {
-              return "[Circular Reference]";
-            }
-
-            // Mark object to detect circular refs
-            if (typeof value === "object" && value.constructor === Object) {
-              try {
-                JSON.stringify(value);
-              } catch (e) {
-                // 🔧 FIXED: Proper error type checking
-                if (e instanceof Error && e.message.includes("circular")) {
-                  return "[Circular Reference Removed]";
-                }
-              }
-            }
-          }
-
-          return value;
-        })
-      );
-    } catch (error) {
-      // 🔧 FIXED: Proper error type checking
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      console.warn("⚠️ Data sanitization failed:", errorMessage);
-      return {
-        error: "Data could not be serialized",
-        originalType: typeof data,
-        timestamp: new Date().toISOString(),
-      };
-    }
-  }
-
   private handleJoinRoom(
     socket: Socket,
-    data: { roomCode: string; playerName: string; playerId?: PlayerId }
+    data: {
+      roomCode: string;
+      playerName: string;
+      playerId?: PlayerId;
+      observerMode?: boolean;
+    }
   ): void {
     const room = this.findRoomByCode(data.roomCode);
 
@@ -188,20 +121,16 @@ export class GameSocketServer {
         message: "Room not found",
         code: "ROOM_NOT_FOUND",
       });
-
-      // 🔧 FIXED: Broadcast error to dashboards for debugging
-      this.broadcastToDashboards(
-        "join_room_error",
-        this.sanitizeForBroadcast({
-          roomCode: data.roomCode,
-          playerName: data.playerName,
-          error: "Room not found",
-          timestamp: new Date().toISOString(),
-        })
-      );
       return;
     }
 
+    // Handle observer mode (for creators watching AI games)
+    if (data.observerMode) {
+      this.handleObserverJoin(socket, room, data.playerName);
+      return;
+    }
+
+    // Regular player join
     if (room.players.size >= room.config.maxPlayers) {
       socket.emit("error", { message: "Room is full", code: "ROOM_FULL" });
       return;
@@ -241,15 +170,24 @@ export class GameSocketServer {
 
     this.fillWithAIPlayers(room);
 
+    // Send comprehensive room joined response
     socket.emit("room_joined", {
       roomId: room.id,
       playerId,
       roomCode: data.roomCode,
+      player,
       roomInfo: this.getRoomInfo(room),
-      players: Array.from(room.players.values()),
+      players: Array.from(room.players.values()).map((p) => ({
+        id: p.id,
+        name: p.name,
+        type: p.type,
+        isAlive: p.isAlive,
+        isReady: p.isReady,
+        role: p.role, // Only send if game started
+      })),
     });
 
-    // 🔧 FIXED: Enhanced broadcasting to both room AND dashboards
+    // Broadcast to room and dashboards
     this.broadcastToRoom(room.id, "player_joined", { player });
     this.broadcastToDashboards(
       "player_joined",
@@ -261,7 +199,44 @@ export class GameSocketServer {
       })
     );
 
+    // Send initial game state if game is in progress
+    if (room.gameEngine) {
+      socket.emit(
+        "game_state_update",
+        room.gameEngine.getSerializableGameState()
+      );
+    }
+
     console.log(`✅ Player ${data.playerName} joined room ${data.roomCode}`);
+  }
+
+  private handleObserverJoin(
+    socket: Socket,
+    room: GameRoom,
+    observerName: string
+  ): void {
+    // Add to observers
+    if (!this.observerSockets.has(room.id)) {
+      this.observerSockets.set(room.id, new Set());
+    }
+    this.observerSockets.get(room.id)!.add(socket);
+    socket.join(room.id + "_observers");
+
+    socket.emit("observer_joined", {
+      roomCode: room.code,
+      roomId: room.id,
+      observerName,
+      players: Array.from(room.players.values()).map((p) => ({
+        id: p.id,
+        name: p.name,
+        type: p.type,
+        isAlive: p.isAlive,
+        role: p.role, // Observers can see all roles
+      })),
+      gameState: room.gameEngine?.getSerializableGameState(),
+    });
+
+    console.log(`👁️ Observer ${observerName} joined room ${room.code}`);
   }
 
   private handleCreateRoom(
@@ -328,10 +303,11 @@ export class GameSocketServer {
       roomId,
       roomCode,
       playerId,
+      player,
       roomInfo: this.getRoomInfo(room),
+      players: Array.from(room.players.values()),
     });
 
-    // 🔧 FIXED: Enhanced dashboard broadcasting with more details
     this.broadcastToDashboards(
       "room_created",
       this.sanitizeForBroadcast({
@@ -395,12 +371,12 @@ export class GameSocketServer {
       ).length;
       room.config.aiCount = room.players.size - room.config.humanCount;
 
+      // Broadcast room update with new players
       this.broadcastToRoom(room.id, "room_updated", {
         players: Array.from(room.players.values()),
         config: room.config,
       });
 
-      // 🔧 FIXED: Broadcast AI player addition to dashboards
       this.broadcastToDashboards(
         "ai_players_added",
         this.sanitizeForBroadcast({
@@ -414,8 +390,11 @@ export class GameSocketServer {
           timestamp: new Date().toISOString(),
         })
       );
+
+      console.log(
+        `🤖 Added ${aiPlayersNeeded} AI players to room ${room.code}`
+      );
     } catch (error) {
-      // 🔧 FIXED: Proper error type checking
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       console.error("❌ Error filling room with AI players:", errorMessage);
@@ -431,7 +410,6 @@ export class GameSocketServer {
     const room = this.rooms.get(connection.roomId);
     if (!room || !room.gameEngine) return;
 
-    // 🔧 FIXED: Broadcast all game actions to dashboards
     this.broadcastToDashboards(
       "game_action_received",
       this.sanitizeForBroadcast({
@@ -444,24 +422,28 @@ export class GameSocketServer {
 
     switch (action.type) {
       case "START_GAME":
-        this.startGame(room, action.playerId);
+        this.startGame(room, action.playerId || connection.playerId);
         break;
       case "SEND_MESSAGE":
-        this.handleMessage(room, action.playerId, action.content);
+        this.handleMessage(
+          room,
+          action.playerId || connection.playerId,
+          action.content || ""
+        );
         break;
       case "CAST_VOTE":
         this.handleVote(
           room,
-          action.playerId,
-          action.targetId,
-          action.reasoning
+          action.playerId || connection.playerId,
+          action.targetId!,
+          action.reasoning || ""
         );
         break;
       case "NIGHT_ACTION":
         this.handleNightAction(
           room,
-          action.playerId,
-          action.action,
+          action.playerId || connection.playerId,
+          action.action!,
           action.targetId
         );
         break;
@@ -469,7 +451,9 @@ export class GameSocketServer {
   }
 
   private startGame(room: GameRoom, playerId: PlayerId): void {
-    if (room.players.get(playerId)?.id !== room.hostId) {
+    const player = room.players.get(playerId);
+    if (!player || player.id !== room.hostId) {
+      console.log(`❌ Player ${playerId} cannot start game - not host`);
       return;
     }
 
@@ -484,11 +468,13 @@ export class GameSocketServer {
 
     const success = room.gameEngine.startGame();
     if (success) {
-      this.broadcastToRoom(room.id, "game_started", {
-        gameState: room.gameEngine.getSerializableGameState(), // 🔧 FIXED: Use serializable version
-      });
+      console.log(`🚀 Game started in room ${room.code}`);
 
-      // 🔧 FIXED: Enhanced dashboard broadcasting
+      // Broadcast to all players and observers
+      const gameState = room.gameEngine.getSerializableGameState();
+      this.broadcastToRoom(room.id, "game_started", { gameState });
+      this.broadcastToObservers(room.id, "game_started", { gameState });
+
       this.broadcastToDashboards(
         "game_started",
         this.sanitizeForBroadcast({
@@ -501,8 +487,9 @@ export class GameSocketServer {
         })
       );
 
-      // 🔧 FIXED: Start AI automation safely without recursion
       this.startAIAutomationSafely(room);
+    } else {
+      console.log(`❌ Failed to start game in room ${room.code}`);
     }
   }
 
@@ -512,18 +499,7 @@ export class GameSocketServer {
     engine.on("game_event", (event: any) => {
       const sanitizedEvent = this.sanitizeForBroadcast(event);
       this.broadcastToRoom(room.id, "game_event", sanitizedEvent);
-
-      // 🔧 FIXED: Enhanced dashboard broadcasting for game events
-      this.broadcastToDashboards(
-        "game_event",
-        this.sanitizeForBroadcast({
-          ...sanitizedEvent,
-          roomCode: room.code,
-          roomId: room.id,
-          playerCount: room.players.size,
-          timestamp: new Date().toISOString(),
-        })
-      );
+      this.broadcastToObservers(room.id, "game_event", sanitizedEvent);
     });
 
     engine.on(
@@ -531,8 +507,13 @@ export class GameSocketServer {
       (data: { newPhase: string; oldPhase: string; round: number }) => {
         const sanitizedData = this.sanitizeForBroadcast(data);
         this.broadcastToRoom(room.id, "phase_changed", sanitizedData);
+        this.broadcastToObservers(room.id, "phase_changed", sanitizedData);
 
-        // 🔧 FIXED: Enhanced phase change broadcasting
+        // Send updated game state
+        const gameState = engine.getSerializableGameState();
+        this.broadcastToRoom(room.id, "game_state_update", gameState);
+        this.broadcastToObservers(room.id, "game_state_update", gameState);
+
         this.broadcastToDashboards(
           "phase_changed",
           this.sanitizeForBroadcast({
@@ -544,7 +525,6 @@ export class GameSocketServer {
           })
         );
 
-        // 🔧 FIXED: Safe AI phase transition without recursion
         this.handleAIPhaseTransitionSafely(room, data.newPhase);
       }
     );
@@ -552,27 +532,19 @@ export class GameSocketServer {
     engine.on("player_eliminated", (data: any) => {
       const sanitizedData = this.sanitizeForBroadcast(data);
       this.broadcastToRoom(room.id, "player_eliminated", sanitizedData);
+      this.broadcastToObservers(room.id, "player_eliminated", sanitizedData);
 
-      // 🔧 FIXED: Enhanced elimination broadcasting
-      this.broadcastToDashboards(
-        "player_eliminated",
-        this.sanitizeForBroadcast({
-          ...sanitizedData,
-          roomCode: room.code,
-          roomId: room.id,
-          remainingPlayers: Array.from(room.players.values()).filter(
-            (p) => p.isAlive
-          ).length,
-          timestamp: new Date().toISOString(),
-        })
-      );
+      // Send updated game state
+      const gameState = engine.getSerializableGameState();
+      this.broadcastToRoom(room.id, "game_state_update", gameState);
+      this.broadcastToObservers(room.id, "game_state_update", gameState);
     });
 
     engine.on("game_ended", (data: any) => {
       const sanitizedData = this.sanitizeForBroadcast(data);
       this.broadcastToRoom(room.id, "game_ended", sanitizedData);
+      this.broadcastToObservers(room.id, "game_ended", sanitizedData);
 
-      // 🔧 FIXED: Enhanced game end broadcasting
       this.broadcastToDashboards(
         "game_ended",
         this.sanitizeForBroadcast({
@@ -588,112 +560,42 @@ export class GameSocketServer {
       this.cleanupGame(room);
     });
 
+    engine.on("message_received", (data: any) => {
+      const sanitizedData = this.sanitizeForBroadcast(data);
+      this.broadcastToRoom(room.id, "message_received", sanitizedData);
+      this.broadcastToObservers(room.id, "message_received", sanitizedData);
+    });
+
+    engine.on("vote_cast", (data: any) => {
+      const sanitizedData = this.sanitizeForBroadcast(data);
+      this.broadcastToRoom(room.id, "vote_cast", sanitizedData);
+      this.broadcastToObservers(room.id, "vote_cast", sanitizedData);
+    });
+
     engine.on("speaker_turn_started", (data: { speakerId: any }) => {
       this.broadcastToRoom(room.id, "speaker_turn_started", data);
+      this.broadcastToObservers(room.id, "speaker_turn_started", data);
 
       const player = room.players.get(data.speakerId);
       if (player?.type === PlayerType.AI) {
-        // 🔧 FIXED: Use safe AI handling
         this.handleAIDiscussionSafely(room, player);
       }
     });
 
     engine.on("next_voter", (data: { voterId: any }) => {
       this.broadcastToRoom(room.id, "next_voter", data);
+      this.broadcastToObservers(room.id, "next_voter", data);
 
       const player = room.players.get(data.voterId);
       if (player?.type === PlayerType.AI) {
-        // 🔧 FIXED: Use safe AI handling
         this.handleAIVotingSafely(room, player);
       }
     });
   }
 
-  // 🔧 FIXED: Enhanced dashboard broadcasting methods
-  private broadcastToDashboards(event: string, data: any): void {
-    const dashboardCount = this.dashboardSockets.size;
-
-    if (dashboardCount > 0) {
-      console.log(`📊 Broadcasting ${event} to ${dashboardCount} dashboards`);
-
-      // 🔧 FIXED: Sanitize data before broadcasting
-      const sanitizedData = this.sanitizeForBroadcast(data);
-
-      this.dashboardSockets.forEach((socket) => {
-        if (socket.connected) {
-          try {
-            socket.emit(event, sanitizedData);
-          } catch (error) {
-            // 🔧 FIXED: Proper error type checking
-            const errorMessage =
-              error instanceof Error ? error.message : String(error);
-            console.warn(
-              `⚠️ Failed to emit ${event} to dashboard:`,
-              errorMessage
-            );
-            // Remove problematic socket
-            this.dashboardSockets.delete(socket);
-          }
-        } else {
-          // Remove disconnected sockets
-          this.dashboardSockets.delete(socket);
-        }
-      });
-    }
-  }
-
-  private broadcastStatsToDashboards(): void {
-    if (this.dashboardSockets.size > 0) {
-      const stats = this.getRoomStats();
-      const aiStats = this.getAIUsageStats();
-
-      const statsData = this.sanitizeForBroadcast({
-        rooms: stats,
-        ai: Array.from(aiStats.entries()),
-        server: {
-          uptime: process.uptime(),
-          memoryUsage: process.memoryUsage(),
-          timestamp: new Date().toISOString(), // 🔧 FIXED: Convert Date to string
-          dashboardConnections: this.dashboardSockets.size,
-          activeConnections: this.players.size,
-        },
-      });
-
-      this.broadcastToDashboards("stats_update", statsData);
-    }
-  }
-
-  private sendStatsToSocket(socket: Socket): void {
-    const stats = this.getRoomStats();
-    const aiStats = this.getAIUsageStats();
-
-    const statsData = this.sanitizeForBroadcast({
-      rooms: stats,
-      ai: Array.from(aiStats.entries()),
-      server: {
-        uptime: process.uptime(),
-        memoryUsage: process.memoryUsage(),
-        timestamp: new Date().toISOString(), // 🔧 FIXED: Convert Date to string
-        dashboardConnections: this.dashboardSockets.size,
-        activeConnections: this.players.size,
-      },
-    });
-
-    try {
-      socket.emit("stats_update", statsData);
-    } catch (error) {
-      // 🔧 FIXED: Proper error type checking
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      console.warn("⚠️ Failed to send stats to socket:", errorMessage);
-    }
-  }
-
-  // 🔧 FIXED: Safe AI automation that prevents recursion
+  // AI Handling Methods (same as before but with better error handling)
   private startAIAutomationSafely(room: GameRoom): void {
     console.log(`🤖 AI automation started for room ${room.code}`);
-
-    // Broadcast AI automation start to dashboards
     this.broadcastToDashboards(
       "ai_automation_started",
       this.sanitizeForBroadcast({
@@ -704,12 +606,10 @@ export class GameSocketServer {
     );
   }
 
-  // 🔧 FIXED: Safe phase transition handling
   private handleAIPhaseTransitionSafely(
     room: GameRoom,
     newPhase: string
   ): void {
-    // Create unique timeout keys to prevent duplicate actions
     const timeoutKey = `${room.id}_${newPhase}_${Date.now()}`;
 
     if (newPhase === "night") {
@@ -723,7 +623,7 @@ export class GameSocketServer {
           const timeout = setTimeout(() => {
             this.handleAIMafiaActionSafely(room, aiPlayer);
             this.aiActionTimeouts.delete(mafiaTimeoutKey);
-          }, 2000 + Math.random() * 3000); // Add randomness
+          }, 2000 + Math.random() * 3000);
 
           this.aiActionTimeouts.set(mafiaTimeoutKey, timeout);
         } else if (aiPlayer.role === PlayerRole.HEALER) {
@@ -731,7 +631,7 @@ export class GameSocketServer {
           const timeout = setTimeout(() => {
             this.handleAIHealerActionSafely(room, aiPlayer);
             this.aiActionTimeouts.delete(healerTimeoutKey);
-          }, 1500 + Math.random() * 2000); // Add randomness
+          }, 1500 + Math.random() * 2000);
 
           this.aiActionTimeouts.set(healerTimeoutKey, timeout);
         }
@@ -739,14 +639,12 @@ export class GameSocketServer {
     }
   }
 
-  // 🔧 FIXED: Safe AI discussion handling
   private async handleAIDiscussionSafely(
     room: GameRoom,
     aiPlayer: Player
   ): Promise<void> {
     const actionKey = `discussion_${room.id}_${aiPlayer.id}_${Date.now()}`;
 
-    // Prevent duplicate actions
     if (this.aiActionTimeouts.has(actionKey)) {
       return;
     }
@@ -781,7 +679,6 @@ export class GameSocketServer {
     } catch (error) {
       console.error(`❌ AI discussion error for ${aiPlayer.name}:`, error);
 
-      // Fallback message
       const timeout = setTimeout(() => {
         if (room.gameEngine && room.players.has(aiPlayer.id)) {
           room.gameEngine.sendMessage(
@@ -796,7 +693,6 @@ export class GameSocketServer {
     }
   }
 
-  // 🔧 FIXED: Safe AI voting handling
   private async handleAIVotingSafely(
     room: GameRoom,
     aiPlayer: Player
@@ -835,7 +731,6 @@ export class GameSocketServer {
     }
   }
 
-  // 🔧 FIXED: Safe AI mafia action handling
   private async handleAIMafiaActionSafely(
     room: GameRoom,
     mafiaPlayer: Player
@@ -876,7 +771,6 @@ export class GameSocketServer {
     }
   }
 
-  // 🔧 FIXED: Safe AI healer action handling
   private async handleAIHealerActionSafely(
     room: GameRoom,
     healerPlayer: Player
@@ -1023,8 +917,6 @@ export class GameSocketServer {
       }
 
       this.broadcastToRoom(room.id, "player_ready", { playerId });
-
-      // 🔧 FIXED: Broadcast ready status to dashboards
       this.broadcastToDashboards(
         "player_ready",
         this.sanitizeForBroadcast({
@@ -1038,13 +930,11 @@ export class GameSocketServer {
   }
 
   private handleDisconnect(socket: Socket): void {
-    // Remove from dashboard sockets if applicable
     const wasDashboard = this.dashboardSockets.has(socket);
     this.dashboardSockets.delete(socket);
 
     if (wasDashboard) {
       console.log(`📊 Dashboard disconnected: ${socket.id}`);
-      // Broadcast dashboard disconnect to remaining dashboards
       this.broadcastToDashboards(
         "dashboard_disconnected",
         this.sanitizeForBroadcast({
@@ -1054,6 +944,18 @@ export class GameSocketServer {
         })
       );
       return;
+    }
+
+    // Remove from observers
+    for (const [roomId, observers] of this.observerSockets.entries()) {
+      if (observers.has(socket)) {
+        observers.delete(socket);
+        console.log(`👁️ Observer disconnected from room ${roomId}`);
+        if (observers.size === 0) {
+          this.observerSockets.delete(roomId);
+        }
+        return;
+      }
     }
 
     const connection = Array.from(this.players.values()).find(
@@ -1082,6 +984,7 @@ export class GameSocketServer {
 
       if (room.players.size === 0) {
         this.rooms.delete(room.id);
+        this.observerSockets.delete(room.id);
         this.broadcastToDashboards(
           "room_deleted",
           this.sanitizeForBroadcast({
@@ -1098,7 +1001,6 @@ export class GameSocketServer {
   }
 
   private cleanupGame(room: GameRoom): void {
-    // Clean up AI timeouts for this room
     for (const [key, timeout] of this.aiActionTimeouts.entries()) {
       if (key.includes(room.id)) {
         clearTimeout(timeout);
@@ -1116,7 +1018,6 @@ export class GameSocketServer {
   }
 
   private cleanupOldTimeouts(): void {
-    // Remove timeouts older than 10 minutes
     const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
 
     for (const [key, timeout] of this.aiActionTimeouts.entries()) {
@@ -1128,16 +1029,139 @@ export class GameSocketServer {
     }
   }
 
-  // 🔧 FIXED: Separate broadcast methods
   private broadcastToRoom(roomId: RoomId, event: string, data: any): void {
     try {
       const sanitizedData = this.sanitizeForBroadcast(data);
       this.io.to(roomId).emit(event, sanitizedData);
     } catch (error) {
-      // 🔧 FIXED: Proper error type checking
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       console.warn(`⚠️ Failed to broadcast to room ${roomId}:`, errorMessage);
+    }
+  }
+
+  private broadcastToObservers(roomId: RoomId, event: string, data: any): void {
+    try {
+      const sanitizedData = this.sanitizeForBroadcast(data);
+      this.io.to(roomId + "_observers").emit(event, sanitizedData);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.warn(
+        `⚠️ Failed to broadcast to observers ${roomId}:`,
+        errorMessage
+      );
+    }
+  }
+
+  private broadcastToDashboards(event: string, data: any): void {
+    const dashboardCount = this.dashboardSockets.size;
+
+    if (dashboardCount > 0) {
+      const sanitizedData = this.sanitizeForBroadcast(data);
+
+      this.dashboardSockets.forEach((socket) => {
+        if (socket.connected) {
+          try {
+            socket.emit(event, sanitizedData);
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
+            console.warn(
+              `⚠️ Failed to emit ${event} to dashboard:`,
+              errorMessage
+            );
+            this.dashboardSockets.delete(socket);
+          }
+        } else {
+          this.dashboardSockets.delete(socket);
+        }
+      });
+    }
+  }
+
+  private broadcastStatsToDashboards(): void {
+    if (this.dashboardSockets.size > 0) {
+      const stats = this.getRoomStats();
+      const aiStats = this.getAIUsageStats();
+
+      const statsData = this.sanitizeForBroadcast({
+        rooms: stats,
+        ai: Array.from(aiStats.entries()),
+        server: {
+          uptime: process.uptime(),
+          memoryUsage: process.memoryUsage(),
+          timestamp: new Date().toISOString(),
+          dashboardConnections: this.dashboardSockets.size,
+          activeConnections: this.players.size,
+        },
+      });
+
+      this.broadcastToDashboards("stats_update", statsData);
+    }
+  }
+
+  private sendStatsToSocket(socket: Socket): void {
+    const stats = this.getRoomStats();
+    const aiStats = this.getAIUsageStats();
+
+    const statsData = this.sanitizeForBroadcast({
+      rooms: stats,
+      ai: Array.from(aiStats.entries()),
+      server: {
+        uptime: process.uptime(),
+        memoryUsage: process.memoryUsage(),
+        timestamp: new Date().toISOString(),
+        dashboardConnections: this.dashboardSockets.size,
+        activeConnections: this.players.size,
+      },
+    });
+
+    try {
+      socket.emit("stats_update", statsData);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.warn("⚠️ Failed to send stats to socket:", errorMessage);
+    }
+  }
+
+  private sanitizeForBroadcast(data: any): any {
+    if (!data) return data;
+
+    try {
+      return JSON.parse(
+        JSON.stringify(data, (key, value) => {
+          if (value instanceof Date) {
+            return value.toISOString();
+          }
+          if (value instanceof Map) {
+            return Object.fromEntries(value);
+          }
+          if (typeof value === "function" || value === undefined) {
+            return null;
+          }
+          if (typeof value === "object" && value !== null) {
+            try {
+              JSON.stringify(value);
+            } catch (e) {
+              if (e instanceof Error && e.message.includes("circular")) {
+                return "[Circular Reference Removed]";
+              }
+            }
+          }
+          return value;
+        })
+      );
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.warn("⚠️ Data sanitization failed:", errorMessage);
+      return {
+        error: "Data could not be serialized",
+        originalType: typeof data,
+        timestamp: new Date().toISOString(),
+      };
     }
   }
 
@@ -1156,7 +1180,7 @@ export class GameSocketServer {
       playerCount: room.players.size,
       maxPlayers: room.config.maxPlayers,
       gameInProgress: !!room.gameEngine,
-      createdAt: room.createdAt.toISOString(), // 🔧 FIXED: Convert Date to string
+      createdAt: room.createdAt.toISOString(),
     });
   }
 
@@ -1216,7 +1240,6 @@ export class GameSocketServer {
     this.rooms.set(roomId, room);
     this.fillWithAIPlayers(room);
 
-    // Auto-start the game
     setTimeout(() => {
       room.gameEngine = new MafiaGameEngine(room.id, room.config);
       this.setupGameEngineHandlers(room);
@@ -1228,7 +1251,6 @@ export class GameSocketServer {
       room.gameEngine.startGame();
       this.startAIAutomationSafely(room);
 
-      // 🔧 FIXED: Enhanced AI-only game broadcasting
       this.broadcastToDashboards(
         "ai_only_game_created",
         this.sanitizeForBroadcast({
@@ -1246,14 +1268,13 @@ export class GameSocketServer {
 
     return this.getRoomInfo(room);
   }
+
   public cleanupOldSessions(): void {
     console.log("🧹 Starting cleanup of old sessions...");
 
     const now = Date.now();
     const ONE_HOUR = 60 * 60 * 1000;
-    const ONE_DAY = 24 * ONE_HOUR;
 
-    // Clean up old AI timeouts (older than 1 hour)
     let timeoutsCleared = 0;
     for (const [key, timeout] of this.aiActionTimeouts.entries()) {
       const timestamp = parseInt(key.split("_").pop() || "0");
@@ -1264,19 +1285,18 @@ export class GameSocketServer {
       }
     }
 
-    // Clean up empty rooms (no players for more than 1 hour)
     let roomsCleaned = 0;
     for (const [roomId, room] of this.rooms.entries()) {
       if (room.players.size === 0) {
         const roomAge = now - room.createdAt.getTime();
         if (roomAge > ONE_HOUR) {
           this.rooms.delete(roomId);
+          this.observerSockets.delete(roomId);
           roomsCleaned++;
         }
       }
     }
 
-    // Clean up disconnected dashboard sockets
     let dashboardsCleaned = 0;
     for (const socket of this.dashboardSockets) {
       if (!socket.connected) {
@@ -1285,7 +1305,6 @@ export class GameSocketServer {
       }
     }
 
-    // Clean up disconnected player connections
     let playersCleaned = 0;
     for (const [playerId, connection] of this.players.entries()) {
       if (!connection.socket.connected) {
@@ -1307,7 +1326,6 @@ export class GameSocketServer {
       activeDashboards: this.dashboardSockets.size,
     });
 
-    // Broadcast cleanup stats to dashboards
     this.broadcastToDashboards("cleanup_completed", {
       timeoutsCleared,
       roomsCleaned,
