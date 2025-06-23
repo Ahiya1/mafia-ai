@@ -12,7 +12,7 @@ import {
   WinCondition,
   GameConfig,
   PlayerType,
-} from "@/types/game";
+} from "../../types/game";
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
 
