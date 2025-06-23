@@ -1184,6 +1184,64 @@ export class GameSocketServer {
     });
   }
 
+  /**
+   * Terminates a room by its ID.
+   * Cleans up players, observers, AI timeouts, and notifies dashboards and sockets.
+   */
+  public terminateRoom(roomId: RoomId): void {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+
+    // Remove all player connections for this room
+    for (const [playerId, connection] of this.players.entries()) {
+      if (connection.roomId === roomId) {
+        try {
+          connection.socket.leave(roomId);
+        } catch {}
+        this.players.delete(playerId);
+      }
+    }
+
+    // Remove observer sockets for this room
+    const observers = this.observerSockets.get(roomId);
+    if (observers) {
+      for (const socket of observers) {
+        try {
+          socket.leave(roomId + "_observers");
+        } catch {}
+      }
+      this.observerSockets.delete(roomId);
+    }
+
+    // Clean up any AI timeouts for this room
+    for (const [key, timeout] of this.aiActionTimeouts.entries()) {
+      if (key.startsWith(roomId)) {
+        clearTimeout(timeout);
+        this.aiActionTimeouts.delete(key);
+      }
+    }
+
+    // Remove the room itself
+    this.rooms.delete(roomId);
+
+    // Broadcast to dashboards
+    this.broadcastToDashboards(
+      "room_terminated",
+      this.sanitizeForBroadcast({
+        roomCode: room.code,
+        roomId: room.id,
+        reason: "Terminated by creator",
+        timestamp: new Date().toISOString(),
+      })
+    );
+
+    // Notify all sockets in the room
+    this.io.to(roomId).emit("room_terminated", {
+      message: "This game has been terminated by the creator.",
+      roomId,
+    });
+  }
+
   // Public API Methods
   getRoomStats(): any {
     const roomList = Array.from(this.rooms.values()).map((room) => ({

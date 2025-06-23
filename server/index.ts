@@ -394,6 +394,9 @@ app.post("/api/creator/ai-only-game", (req: Request, res: Response) => {
   }
 });
 
+// Add these routes to your main server file (paste.txt)
+// Insert after your existing routes, before the error handlers
+
 // NEW: Creator endpoints for enhanced dashboard functionality
 app.post("/api/creator/active-games", (req: Request, res: Response) => {
   try {
@@ -416,6 +419,14 @@ app.post("/api/creator/active-games", (req: Request, res: Response) => {
       isAIOnly: room.humanCount === 0,
       createdAt: room.createdAt,
       status: room.gameInProgress ? "active" : "waiting",
+      duration: room.gameInProgress
+        ? Math.floor((Date.now() - new Date(room.createdAt).getTime()) / 1000)
+        : 0,
+      aiModels: room.players
+        ? Array.from(room.players.values())
+            .filter((p: any) => p.type === "ai")
+            .map((p: any) => p.model || "claude-haiku")
+        : [],
     }));
 
     return res.json({
@@ -490,13 +501,25 @@ app.post("/api/creator/terminate-game", (req: Request, res: Response) => {
       });
     }
 
-    // This would require additional methods in GameSocketServer
-    // For now, return success
-    logger.info(`Creator terminated game: ${gameId}`);
-    return res.json({
-      success: true,
-      message: "Game terminated",
-    });
+    // Find the room and terminate it
+    const rooms = gameSocketServer.getRoomStats().roomList;
+    const room = rooms.find((r: any) => r.id === gameId);
+
+    if (room) {
+      // Broadcast game termination
+      gameSocketServer.terminateRoom(room.id);
+      logger.info(`Creator terminated game: ${gameId}`);
+
+      return res.json({
+        success: true,
+        message: "Game terminated",
+      });
+    } else {
+      return res.status(404).json({
+        success: false,
+        message: "Game not found",
+      });
+    }
   } catch (error) {
     logger.error("Game termination error:", error);
     return res.status(500).json({
