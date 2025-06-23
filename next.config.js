@@ -1,4 +1,4 @@
-// next.config.js - Temporary fix by disabling CSS optimization
+// next.config.js - Explicit beasties configuration
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Performance optimizations
@@ -51,9 +51,12 @@ const nextConfig = {
         : "http://localhost:3000",
   },
 
-  // Experimental features - CSS optimization disabled temporarily
+  // Experimental features with explicit beasties
   experimental: {
-    // optimizeCss: true, // <- Commented out to fix build
+    optimizeCss: {
+      // Explicitly configure to use beasties instead of critters
+      critters: require("beasties"),
+    },
     webVitalsAttribution: ["CLS", "LCP"],
   },
 
