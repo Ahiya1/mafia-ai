@@ -319,7 +319,7 @@ test_ai_models() {
     # Create AI model test with proper environment loading
     cat > ai_test.js << 'EOF'
 // 🔧 FIXED: Load environment variables first
-require('dotenv').config({ path: '.env.local', override: true });
+require('dotenv').config({ });
 
 const { AIModelManager } = require('./dist/server/lib/ai/models');
 

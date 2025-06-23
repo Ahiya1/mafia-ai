@@ -12,7 +12,7 @@ import { analyticsManager } from "./lib/analytics/analytics-manager";
 import { createClient } from "@supabase/supabase-js";
 
 // Load environment variables
-dotenv.config({ path: ".env.local", override: true });
+dotenv.config({});
 
 // Initialize logger
 const logger = winston.createLogger({
