@@ -1401,6 +1401,113 @@ app.get("/auth/confirm", async (req: Request, res: Response) => {
 });
 
 // ================================
+// 🔥 DEBUG ENDPOINTS - EMERGENCY PRODUCTION TROUBLESHOOTING
+// ================================
+
+// Game state inspection
+app.get("/api/debug/game/:roomId", (req: Request, res: Response) => {
+  try {
+    const { roomId } = req.params;
+    const rooms = gameSocketServer.getRoomStats().roomList;
+    const room = rooms.find((r: any) => r.id === roomId);
+
+    if (!room) {
+      return res.status(404).json({
+        error: "Room not found",
+        roomId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    res.json({
+      success: true,
+      room,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    logger.error("Debug endpoint error:", error);
+    res.status(500).json({
+      error: "Internal server error",
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// Find stuck games
+app.get("/api/debug/stuck-games", (req: Request, res: Response) => {
+  try {
+    const stats = gameSocketServer.getRoomStats();
+    const stuckGames = stats.roomList.filter(
+      (room: any) =>
+        room.gameInProgress && room.phase === "voting" && room.duration > 300 // 5+ minutes
+    );
+
+    res.json({
+      success: true,
+      stuckGamesCount: stuckGames.length,
+      totalActiveGames: stats.activeRooms,
+      stuckGames,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    logger.error("Stuck games scan error:", error);
+    res.status(500).json({
+      error: "Failed to scan for stuck games",
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// Server health check
+app.get("/api/debug/server-health", (req: Request, res: Response) => {
+  try {
+    const stats = gameSocketServer.getRoomStats();
+    const health = {
+      server: getSafeServerMetrics(),
+      rooms: stats,
+      healthy: true,
+      timestamp: new Date().toISOString(),
+    };
+
+    res.json({
+      success: true,
+      health,
+    });
+  } catch (error) {
+    logger.error("Health check error:", error);
+    res.status(500).json({
+      success: false,
+      healthy: false,
+      error: error instanceof Error ? error.message : String(error),
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// Emergency room termination
+app.post("/api/debug/terminate-room/:roomId", (req: Request, res: Response) => {
+  try {
+    const { roomId } = req.params;
+    const { reason = "Emergency termination" } = req.body;
+
+    const result = gameSocketServer.terminateRoom(roomId, reason);
+
+    res.json({
+      success: result.success,
+      message: result.success ? "Room terminated" : result.message,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    logger.error("Room termination error:", error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// ================================
 // ERROR HANDLING MIDDLEWARE
 // ================================
 
