@@ -1,4 +1,4 @@
-// server/lib/auth/auth-manager.ts - FIXED: Correct Supabase Schema Integration
+// server/lib/auth/auth-manager.ts - FIXED: Added resendConfirmationEmail method
 import { createClient } from "@supabase/supabase-js";
 import { User, Session } from "@supabase/supabase-js";
 
@@ -176,6 +176,132 @@ export class AuthManager {
         .eq("id", userId);
     } catch (error) {
       console.error("Error updating last login:", error);
+    }
+  }
+
+  // ================================
+  // EMAIL MANAGEMENT METHODS
+  // ================================
+
+  async resendConfirmationEmail(email: string): Promise<{ error: any }> {
+    try {
+      const { error } = await this.supabase.auth.resend({
+        type: "signup",
+        email: email,
+      });
+
+      return { error };
+    } catch (error) {
+      console.error("Error resending confirmation email:", error);
+      return { error };
+    }
+  }
+
+  async confirmEmail(
+    code: string
+  ): Promise<{ success: boolean; message: string; user?: any; error?: any }> {
+    try {
+      if (!code) {
+        return {
+          success: false,
+          message: "Confirmation code is required",
+          error: { message: "Confirmation code is required" },
+        };
+      }
+
+      // Use Supabase client to verify the code
+      const { data, error } = await this.supabase.auth.exchangeCodeForSession(
+        code
+      );
+
+      if (error) {
+        console.error("Email confirmation error:", error);
+        return {
+          success: false,
+          message: error.message || "Failed to confirm email",
+          error,
+        };
+      }
+
+      if (data.user) {
+        // Update user as verified in our database
+        const { error: updateError } = await this.supabase
+          .from("users")
+          .update({
+            is_verified: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", data.user.id);
+
+        if (updateError) {
+          console.error(
+            "Error updating user verification status:",
+            updateError
+          );
+        }
+
+        console.log("User email confirmed successfully", {
+          userId: data.user.id,
+          email: data.user.email,
+        });
+
+        return {
+          success: true,
+          message: "Email confirmed successfully",
+          user: {
+            id: data.user.id,
+            email: data.user.email,
+            confirmed: true,
+          },
+        };
+      }
+
+      return {
+        success: false,
+        message: "Invalid confirmation code",
+        error: { message: "Invalid confirmation code" },
+      };
+    } catch (error) {
+      console.error("Email confirmation error:", error);
+      return {
+        success: false,
+        message: "Internal server error",
+        error,
+      };
+    }
+  }
+
+  async manuallyVerifyUser(
+    email: string
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      const { error } = await this.supabase
+        .from("users")
+        .update({
+          is_verified: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("email", email);
+
+      if (error) {
+        console.error("Error manually verifying user:", error);
+        return {
+          success: false,
+          message: "Failed to verify user",
+        };
+      }
+
+      console.log("User manually verified:", email);
+      return {
+        success: true,
+        message: "User verified successfully",
+      };
+    } catch (error) {
+      console.error("Manual verification error:", error);
+      return {
+        success: false,
+        message: "Internal server error",
+      };
     }
   }
 

@@ -1207,6 +1207,198 @@ app.get("/api/railway-test", (_req: Request, res: Response) => {
   });
 });
 
+// Add this to your server/index.ts - Email confirmation endpoint
+
+// ================================
+// EMAIL CONFIRMATION ENDPOINT
+// ================================
+
+app.post("/api/auth/confirm", async (req: Request, res: Response) => {
+  try {
+    const { code, type } = req.body;
+
+    const result = await authManager.confirmEmail(code);
+
+    if (result.success) {
+      return res.json({
+        success: true,
+        message: result.message,
+        user: result.user,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: result.message,
+      });
+    }
+  } catch (error) {
+    logger.error("Email confirmation endpoint error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+    });
+  }
+});
+
+// ================================
+// RESEND CONFIRMATION EMAIL
+// ================================
+
+// ================================
+// RESEND CONFIRMATION EMAIL - FIXED VERSION
+// ================================
+
+app.post(
+  "/api/auth/resend-confirmation",
+  async (req: Request, res: Response) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          error: "Email is required",
+        });
+      }
+
+      // Use the new method instead of accessing private property
+      const { error } = await authManager.resendConfirmationEmail(email);
+
+      if (error) {
+        logger.error("Resend confirmation error:", error);
+        return res.status(400).json({
+          success: false,
+          error: error.message || "Failed to resend confirmation email",
+        });
+      }
+
+      logger.info("Confirmation email resent", { email });
+
+      return res.json({
+        success: true,
+        message: "Confirmation email sent successfully",
+      });
+    } catch (error) {
+      logger.error("Resend confirmation error:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Internal server error",
+      });
+    }
+  }
+);
+
+app.get("/auth/confirm", async (req: Request, res: Response) => {
+  try {
+    const { code, type } = req.query;
+
+    if (!code) {
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Email Confirmation - AI Mafia</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { color: #ef4444; }
+            .success { color: #10b981; }
+          </style>
+        </head>
+        <body>
+          <h1>🕵️‍♂️ AI Mafia</h1>
+          <div class="error">
+            <h2>Missing Confirmation Code</h2>
+            <p>Please use the confirmation link from your email.</p>
+          </div>
+          <p><a href="${
+            process.env.FRONTEND_URL || "https://mafia-ai.vercel.app"
+          }">Return to AI Mafia</a></p>
+        </body>
+        </html>
+      `);
+    }
+
+    // Attempt to confirm the email
+    const result = await authManager.confirmEmail(code as string);
+
+    if (result.success) {
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Email Confirmed - AI Mafia</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .success { color: #10b981; }
+            .button { background: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <h1>🕵️‍♂️ AI Mafia</h1>
+          <div class="success">
+            <h2>✅ Email Confirmed!</h2>
+            <p>Your email has been successfully verified. You can now sign in to AI Mafia.</p>
+          </div>
+          <a href="${
+            process.env.FRONTEND_URL || "https://mafia-ai.vercel.app"
+          }/auth/signin" class="button">
+            Sign In to AI Mafia
+          </a>
+        </body>
+        </html>
+      `);
+    } else {
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Confirmation Failed - AI Mafia</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { color: #ef4444; }
+          </style>
+        </head>
+        <body>
+          <h1>🕵️‍♂️ AI Mafia</h1>
+          <div class="error">
+            <h2>❌ Confirmation Failed</h2>
+            <p>${result.message}</p>
+            <p>Please try signing up again or contact support.</p>
+          </div>
+          <p><a href="${
+            process.env.FRONTEND_URL || "https://mafia-ai.vercel.app"
+          }">Return to AI Mafia</a></p>
+        </body>
+        </html>
+      `);
+    }
+  } catch (error) {
+    logger.error("Email confirmation page error:", error);
+    return res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Error - AI Mafia</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+          .error { color: #ef4444; }
+        </style>
+      </head>
+      <body>
+        <h1>🕵️‍♂️ AI Mafia</h1>
+        <div class="error">
+          <h2>Server Error</h2>
+          <p>Something went wrong. Please try again later.</p>
+        </div>
+        <p><a href="${
+          process.env.FRONTEND_URL || "https://mafia-ai.vercel.app"
+        }">Return to AI Mafia</a></p>
+      </body>
+      </html>
+    `);
+  }
+});
+
 // ================================
 // ERROR HANDLING MIDDLEWARE
 // ================================
