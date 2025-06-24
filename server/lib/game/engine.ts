@@ -1,4 +1,4 @@
-// server/lib/game/engine.ts - UPDATED: Real AI Integration + Enhanced Phase Management
+// server/lib/game/engine.ts - FIXED: Enhanced Observer Updates with Player Names
 import {
   GameState,
   Player,
@@ -84,28 +84,104 @@ export class MafiaGameEngine extends EventEmitter {
    * Setup state manager event handlers
    */
   private setupStateManagerHandlers(): void {
+    // FIXED: Enhanced observer update handling with player names
     this.stateManager.on("observer_update", (data) => {
-      this.emitEvent("observer_update", data);
+      const enhancedData = this.enhanceObserverUpdate(data);
+      this.emitEvent("observer_update", enhancedData);
     });
 
     this.stateManager.on("player_eliminated", (data) => {
-      this.emitEvent("player_eliminated", data);
+      const enhancedData = this.enhanceWithPlayerNames(data);
+      this.emitEvent("player_eliminated", enhancedData);
     });
 
     this.stateManager.on("message_added", (data) => {
-      this.emitEvent("message_received", data);
+      const enhancedData = this.enhanceWithPlayerNames(data);
+      this.emitEvent("message_received", enhancedData);
     });
 
     this.stateManager.on("vote_added", (data) => {
-      this.emitEvent("vote_cast", data);
+      const enhancedData = this.enhanceWithPlayerNames(data);
+      this.emitEvent("vote_cast", enhancedData);
     });
+  }
+
+  /**
+   * FIXED: Enhance observer updates with complete player information
+   */
+  private enhanceObserverUpdate(data: any): any {
+    if (!data.update) return data;
+
+    const update = data.update;
+    const player = this.gameState.players.get(update.playerId);
+
+    if (!player) return data;
+
+    const enhancedUpdate = {
+      ...update,
+      playerName: player.name,
+      playerType: player.type,
+      playerModel: player.model,
+      playerRole: player.role,
+      isPlayerAlive: player.isAlive,
+      // FIXED: Add contextual information for better observer experience
+      context: {
+        phase: this.gameState.phase,
+        round: this.gameState.currentRound,
+        alivePlayers: Array.from(this.gameState.players.values())
+          .filter((p) => p.isAlive)
+          .map((p) => ({ id: p.id, name: p.name, role: p.role })),
+        timestamp: new Date().toISOString(),
+      },
+    };
+
+    return { update: enhancedUpdate };
+  }
+
+  /**
+   * FIXED: Enhance any data with player names for better display
+   */
+  private enhanceWithPlayerNames(data: any): any {
+    if (!data) return data;
+
+    const enhanced = { ...data };
+
+    // Add player names for common ID fields
+    if (data.playerId) {
+      const player = this.gameState.players.get(data.playerId);
+      if (player) {
+        enhanced.playerName = player.name;
+        enhanced.playerType = player.type;
+        enhanced.playerRole = player.role;
+      }
+    }
+
+    if (data.targetId) {
+      const target = this.gameState.players.get(data.targetId);
+      if (target) {
+        enhanced.targetName = target.name;
+        enhanced.targetType = target.type;
+        enhanced.targetRole = target.role;
+      }
+    }
+
+    if (data.voterId) {
+      const voter = this.gameState.players.get(data.voterId);
+      if (voter) {
+        enhanced.voterName = voter.name;
+        enhanced.voterType = voter.type;
+        enhanced.voterRole = voter.role;
+      }
+    }
+
+    return enhanced;
   }
 
   /**
    * Get serializable game state with observer data
    */
   getSerializableGameState(): any {
-    return {
+    const baseState = {
       id: this.gameState.id,
       roomId: this.gameState.roomId,
       phase: this.gameState.phase,
@@ -126,6 +202,24 @@ export class MafiaGameEngine extends EventEmitter {
         targetId: vote.targetId,
         reasoning: vote.reasoning,
         timestamp: vote.timestamp.toISOString(),
+        // FIXED: Include player names in vote data
+        voterName: this.gameState.players.get(vote.voterId)?.name,
+        targetName: this.gameState.players.get(vote.targetId)?.name,
+      })),
+      messages: this.gameState.messages.map((message) => ({
+        ...message,
+        timestamp: message.timestamp.toISOString(),
+        // FIXED: Include player name in message data
+        playerName: this.gameState.players.get(message.playerId)?.name,
+      })),
+      nightActions: this.gameState.nightActions.map((action) => ({
+        ...action,
+        timestamp: action.timestamp.toISOString(),
+        // FIXED: Include player names in night action data
+        playerName: this.gameState.players.get(action.playerId)?.name,
+        targetName: action.targetId
+          ? this.gameState.players.get(action.targetId)?.name
+          : undefined,
       })),
       eliminatedPlayers: this.gameState.eliminatedPlayers,
       winner: this.gameState.winner,
@@ -135,8 +229,15 @@ export class MafiaGameEngine extends EventEmitter {
       currentSpeaker: this.gameState.currentSpeaker,
       gameConfig: this.gameState.gameConfig,
       phaseStatus: this.phaseManager.getPhaseStatus(this.gameState),
+      gameHistory: this.gameState.gameHistory.map((event) => ({
+        ...event,
+        timestamp: event.timestamp.toISOString(),
+      })),
+      // FIXED: Include complete observer data
       observerData: this.stateManager.getObserverGameState(),
     };
+
+    return baseState;
   }
 
   /**
@@ -164,7 +265,10 @@ export class MafiaGameEngine extends EventEmitter {
       this.assignAIPersonality(player);
     }
 
-    this.emitEvent("player_joined", { playerId: player.id });
+    this.emitEvent("player_joined", {
+      playerId: player.id,
+      playerName: player.name,
+    });
 
     // Check if we can auto-start
     if (this.gameState.players.size === this.gameState.gameConfig.maxPlayers) {
@@ -214,6 +318,8 @@ export class MafiaGameEngine extends EventEmitter {
       return false;
     }
 
+    const player = this.gameState.players.get(playerId);
+
     // Remove from state manager
     this.stateManager.removePlayer(playerId);
 
@@ -224,7 +330,10 @@ export class MafiaGameEngine extends EventEmitter {
     this.aiPersonalities.delete(playerId);
     this.aiActionQueue.delete(playerId);
 
-    this.emitEvent("player_left", { playerId });
+    this.emitEvent("player_left", {
+      playerId,
+      playerName: player?.name,
+    });
 
     // Check win condition if game is active
     if (
@@ -325,7 +434,7 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * Handle real AI mafia action using AI response generator
+   * FIXED: Handle real AI mafia action with enhanced observer updates
    */
   private async handleAIMafiaActionReal(mafiaPlayer: Player): Promise<void> {
     const personality = this.aiPersonalities.get(mafiaPlayer.id);
@@ -349,7 +458,7 @@ export class MafiaGameEngine extends EventEmitter {
         `🔪 ${mafiaPlayer.name} (Mafia) is deciding who to eliminate...`
       );
 
-      // Generate mafia coordination thoughts for observers
+      // FIXED: Generate mafia coordination thoughts with enhanced details
       const coordination = await aiResponseGenerator.generateMafiaCoordination(
         context,
         personality,
@@ -357,7 +466,11 @@ export class MafiaGameEngine extends EventEmitter {
         availableTargets
       );
 
-      this.stateManager.addMafiaChat(mafiaPlayer.id, coordination);
+      // Add enhanced mafia chat for observers
+      this.stateManager.addMafiaChat(
+        mafiaPlayer.id,
+        `🔴 ${mafiaPlayer.name} (${personality.model}): ${coordination}`
+      );
 
       // Get the actual decision
       const decision = await aiResponseGenerator.generateNightActionResponse(
@@ -372,10 +485,31 @@ export class MafiaGameEngine extends EventEmitter {
           `🔪 ${mafiaPlayer.name} chose to eliminate ${targetPlayer?.name}`
         );
 
+        // FIXED: Add detailed AI reasoning for observers
+        this.stateManager.addAIReasoning(
+          mafiaPlayer.id,
+          `🎯 Target Selection: ${mafiaPlayer.name} chose ${
+            targetPlayer?.name
+          }. Reasoning: ${
+            decision.reasoning ||
+            "Strategic elimination based on threat assessment"
+          }`
+        );
+
         // Add delay for realism
         setTimeout(() => {
           this.nightAction(mafiaPlayer.id, "kill", decision.targetId!);
         }, 5000 + Math.random() * 15000);
+      } else {
+        // FIXED: Handle case where no target is chosen
+        this.stateManager.addAIReasoning(
+          mafiaPlayer.id,
+          `🤔 ${
+            mafiaPlayer.name
+          } decided not to eliminate anyone this round. Strategy: ${
+            decision.reasoning || "Waiting for better opportunity"
+          }`
+        );
       }
     } catch (error) {
       console.error(
@@ -387,7 +521,7 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * Handle real AI healer action using AI response generator
+   * FIXED: Handle real AI healer action with enhanced observer updates
    */
   private async handleAIHealerActionReal(healerPlayer: Player): Promise<void> {
     const personality = this.aiPersonalities.get(healerPlayer.id);
@@ -406,14 +540,18 @@ export class MafiaGameEngine extends EventEmitter {
         `🛡️ ${healerPlayer.name} (Healer) is deciding who to protect...`
       );
 
-      // Generate healer thoughts for observers
+      // FIXED: Generate healer thoughts with enhanced details
       const thoughts = await aiResponseGenerator.generateHealerReasoning(
         context,
         personality,
         availableTargets
       );
 
-      this.stateManager.addHealerThoughts(healerPlayer.id, thoughts);
+      // Add enhanced healer thoughts for observers
+      this.stateManager.addHealerThoughts(
+        healerPlayer.id,
+        `🟢 ${healerPlayer.name} (${personality.model}): ${thoughts}`
+      );
 
       // Get the actual decision
       const decision = await aiResponseGenerator.generateNightActionResponse(
@@ -428,10 +566,29 @@ export class MafiaGameEngine extends EventEmitter {
           `🛡️ ${healerPlayer.name} chose to protect ${targetPlayer?.name}`
         );
 
+        // FIXED: Add detailed healer reasoning for observers
+        this.stateManager.addAIReasoning(
+          healerPlayer.id,
+          `🛡️ Protection Choice: ${healerPlayer.name} chose to protect ${
+            targetPlayer?.name
+          }. Analysis: ${
+            decision.reasoning ||
+            "Based on threat assessment and strategic value"
+          }`
+        );
+
         // Add delay for realism
         setTimeout(() => {
           this.nightAction(healerPlayer.id, "heal", decision.targetId!);
         }, 3000 + Math.random() * 10000);
+      } else {
+        // FIXED: Handle case where healer chooses not to heal
+        this.stateManager.addAIReasoning(
+          healerPlayer.id,
+          `🤔 ${healerPlayer.name} decided not to protect anyone. Strategy: ${
+            decision.reasoning || "Conserving abilities or strategic abstention"
+          }`
+        );
       }
     } catch (error) {
       console.error(
@@ -456,7 +613,10 @@ export class MafiaGameEngine extends EventEmitter {
     this.gameState.currentSpeaker = this.gameState.speakingOrder[0];
 
     this.emitEvent("discussion_started", {
-      speakingOrder: this.gameState.speakingOrder,
+      speakingOrder: this.gameState.speakingOrder.map((id) => ({
+        id,
+        name: this.gameState.players.get(id)?.name,
+      })),
       speakingTime: this.gameState.gameConfig.speakingTimePerPlayer,
     });
 
@@ -479,7 +639,10 @@ export class MafiaGameEngine extends EventEmitter {
     this.gameState.currentSpeaker = this.gameState.speakingOrder[0];
 
     this.emitEvent("voting_started", {
-      votingOrder: this.gameState.speakingOrder,
+      votingOrder: this.gameState.speakingOrder.map((id) => ({
+        id,
+        name: this.gameState.players.get(id)?.name,
+      })),
     });
 
     // Start AI voting
@@ -507,7 +670,7 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * Handle real AI voting using AI response generator
+   * FIXED: Handle real AI voting with enhanced observer updates
    */
   private async handleAIVotingReal(aiPlayer: Player): Promise<void> {
     const personality = this.aiPersonalities.get(aiPlayer.id);
@@ -542,10 +705,14 @@ export class MafiaGameEngine extends EventEmitter {
         `🗳️ ${aiPlayer.name} voted to eliminate ${targetPlayer?.name}: "${votingDecision.reasoning}"`
       );
 
-      // Add AI reasoning for observers
+      // FIXED: Add enhanced AI reasoning for observers with more context
       this.stateManager.addAIReasoning(
         aiPlayer.id,
-        `Voting for ${targetPlayer?.name}: ${votingDecision.reasoning}`
+        `🗳️ ${aiPlayer.name} (${personality.model}) voting for ${
+          targetPlayer?.name
+        }: "${votingDecision.reasoning}" | Suspicion level: ${
+          context.suspicionLevels?.[votingDecision.targetId] || "Unknown"
+        }/10`
       );
 
       // Cast the vote
@@ -599,7 +766,7 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * Handle AI discussion with real responses
+   * FIXED: Handle AI discussion with enhanced responses and observer updates
    */
   async handleAIDiscussionReal(aiPlayer: Player): Promise<void> {
     const personality = this.aiPersonalities.get(aiPlayer.id);
@@ -621,12 +788,18 @@ export class MafiaGameEngine extends EventEmitter {
 
       console.log(`💬 ${aiPlayer.name}: "${response.content}"`);
 
-      // Add AI reasoning for observers
+      // FIXED: Add enhanced AI reasoning for observers with strategy context
       this.stateManager.addAIReasoning(
         aiPlayer.id,
-        `Speaking: ${
-          response.reasoning || "Expressing thoughts about the game"
-        }`
+        `💭 ${aiPlayer.name} (${personality.model}) speaking strategy: ${
+          response.reasoning || response.content
+        } | Role: ${aiPlayer.role} | Current suspicions: ${Object.entries(
+          context.suspicionLevels || {}
+        )
+          .map(
+            ([id, level]) => `${this.gameState.players.get(id)?.name}:${level}`
+          )
+          .join(", ")}`
       );
 
       // Send the message with a delay for realism
@@ -951,7 +1124,11 @@ export class MafiaGameEngine extends EventEmitter {
 
     console.log(`🎭 Roles assigned: 2 Mafia, 1 Healer, 7 Citizens`);
     this.emitEvent("roles_assigned", {
-      assignments: shuffled.map((p) => ({ id: p.id, role: p.role })),
+      assignments: shuffled.map((p) => ({
+        id: p.id,
+        role: p.role,
+        name: p.name,
+      })),
     });
   }
 
@@ -1036,7 +1213,13 @@ export class MafiaGameEngine extends EventEmitter {
     });
 
     if (tiedPlayers.length > 1) {
-      this.emitEvent("vote_tied", { tiedPlayers, voteCount: maxVotes });
+      this.emitEvent("vote_tied", {
+        tiedPlayers: tiedPlayers.map((id) => ({
+          id,
+          name: this.gameState.players.get(id)?.name,
+        })),
+        voteCount: maxVotes,
+      });
       this.changePhase(GamePhase.NIGHT);
       return;
     }
@@ -1070,6 +1253,7 @@ export class MafiaGameEngine extends EventEmitter {
 
     this.emitEvent("speaker_turn_started", {
       speakerId: this.gameState.currentSpeaker,
+      speakerName: player?.name,
       timeLimit: speakingTime,
     });
 
@@ -1106,7 +1290,13 @@ export class MafiaGameEngine extends EventEmitter {
 
     if (nextIndex < this.gameState.speakingOrder.length) {
       this.gameState.currentSpeaker = this.gameState.speakingOrder[nextIndex];
-      this.emitEvent("next_voter", { voterId: this.gameState.currentSpeaker });
+      const nextPlayer = this.gameState.players.get(
+        this.gameState.currentSpeaker
+      );
+      this.emitEvent("next_voter", {
+        voterId: this.gameState.currentSpeaker,
+        voterName: nextPlayer?.name,
+      });
     } else {
       this.processVotes();
     }

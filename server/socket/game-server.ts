@@ -1,4 +1,4 @@
-// server/socket/game-server.ts - FIXED: Room capacity and observer issues
+// server/socket/game-server.ts - FIXED: Enhanced Observer Support with Complete History
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
 import { MafiaGameEngine } from "../lib/game/engine";
@@ -50,7 +50,7 @@ export class GameSocketServer {
     }, 2000);
 
     console.log(
-      "🚀 Game Socket Server initialized with enhanced room management"
+      "🚀 Game Socket Server initialized with enhanced observer persistence"
     );
   }
 
@@ -235,39 +235,171 @@ export class GameSocketServer {
     );
   }
 
-  // FIXED: Enhanced observer joining
+  // FIXED: Enhanced observer joining with complete accumulated history
   private handleObserverJoin(
     socket: Socket,
     room: GameRoom,
     observerName: string,
     playerId: string
   ): void {
+    console.log(`👁️ Observer ${observerName} joining room ${room.code}...`);
+
     // Create observer connection
     this.playerManager.createConnection(playerId, socket, room.id, true);
 
     // Join observer socket room
     socket.join(room.id + "_observers");
+    socket.join(room.id); // Also join main room for game events
 
-    // Send observer joined response
+    // FIXED: Get complete observer history from game engine
+    const completeObserverData = this.getCompleteObserverHistory(room);
+
+    // Send enhanced observer joined response with complete history
     socket.emit("observer_joined", {
       roomCode: room.code,
       roomId: room.id,
       observerName,
-      playerId, // Include playerId for consistency
+      playerId,
       players: Array.from(room.players.values()).map((p) => ({
         id: p.id,
         name: p.name,
         type: p.type,
         isAlive: p.isAlive,
         role: p.role, // Observers can see all roles
+        model: p.model, // Show AI model for AI players
       })),
       gameState: room.gameEngine?.getSerializableGameState(),
-      observerMode: true, // Explicitly set this
+      observerMode: true,
+      // FIXED: Include complete accumulated observer data
+      observerData: completeObserverData,
+      joinTimestamp: new Date().toISOString(),
     });
 
+    // FIXED: Send all accumulated observer updates individually for real-time display
+    if (completeObserverData.observerUpdates.length > 0) {
+      console.log(
+        `📊 Sending ${completeObserverData.observerUpdates.length} accumulated observer updates`
+      );
+
+      // Send updates in batches to avoid overwhelming the socket
+      const batchSize = 10;
+      for (
+        let i = 0;
+        i < completeObserverData.observerUpdates.length;
+        i += batchSize
+      ) {
+        const batch = completeObserverData.observerUpdates.slice(
+          i,
+          i + batchSize
+        );
+        setTimeout(() => {
+          batch.forEach((update: any) => {
+            socket.emit("observer_update", { update });
+          });
+        }, i * 50); // 50ms delay between batches
+      }
+    }
+
     console.log(
-      `👁️ Observer ${observerName} joined room ${room.code} successfully`
+      `✅ Observer ${observerName} joined room ${room.code} with complete history`
     );
+
+    // Broadcast to dashboards
+    this.broadcastToDashboards(
+      "observer_joined",
+      this.sanitizeForBroadcast({
+        observerName,
+        roomCode: room.code,
+        roomId: room.id,
+        playerId,
+        observerUpdates: completeObserverData.observerUpdates.length,
+        timestamp: new Date().toISOString(),
+      })
+    );
+  }
+
+  // FIXED: New method to get complete observer history
+  private getCompleteObserverHistory(room: GameRoom): any {
+    if (!room.gameEngine) {
+      return {
+        observerUpdates: [],
+        suspicionMatrix: {},
+        gameAnalytics: {
+          duration: 0,
+          rounds: 0,
+          totalMessages: 0,
+          totalVotes: 0,
+          totalNightActions: 0,
+          eliminations: 0,
+          playerStats: { total: 0, ai: 0, human: 0, alive: 0 },
+          phaseStats: {},
+          playerActivity: {},
+        },
+        phaseHistory: [],
+      };
+    }
+
+    // Get complete observer state from game engine
+    const gameState = room.gameEngine.getSerializableGameState();
+    const observerData = gameState.observerData || {};
+
+    console.log(`📊 Retrieved observer data:`, {
+      observerUpdates: observerData.observerUpdates?.length || 0,
+      hasAnalytics: !!observerData.gameAnalytics,
+      hasSuspicionMatrix: !!observerData.suspicionMatrix,
+    });
+
+    return {
+      observerUpdates: observerData.observerUpdates || [],
+      suspicionMatrix: observerData.suspicionMatrix || {},
+      gameAnalytics: observerData.gameAnalytics || {
+        duration: gameState.phaseStartTime
+          ? Date.now() - new Date(gameState.phaseStartTime).getTime()
+          : 0,
+        rounds: gameState.currentRound || 0,
+        totalMessages: gameState.messages?.length || 0,
+        totalVotes: gameState.votes?.length || 0,
+        totalNightActions: gameState.nightActions?.length || 0,
+        eliminations: gameState.eliminatedPlayers?.length || 0,
+        playerStats: {
+          total: room.players.size,
+          ai: Array.from(room.players.values()).filter(
+            (p) => p.type === PlayerType.AI
+          ).length,
+          human: Array.from(room.players.values()).filter(
+            (p) => p.type === PlayerType.HUMAN
+          ).length,
+          alive: Array.from(room.players.values()).filter((p) => p.isAlive)
+            .length,
+        },
+        phaseStats: {},
+        playerActivity: {},
+      },
+      phaseHistory: this.buildPhaseHistory(room),
+    };
+  }
+
+  // FIXED: New method to build phase history for observers
+  private buildPhaseHistory(room: GameRoom): any[] {
+    if (!room.gameEngine) return [];
+
+    const gameState = room.gameEngine.getSerializableGameState();
+    const history = gameState.gameHistory || [];
+
+    return history
+      .filter(
+        (event: any) =>
+          event.type === "phase_changed" ||
+          event.type === "game_started" ||
+          event.type === "player_eliminated"
+      )
+      .map((event: any) => ({
+        type: event.type,
+        timestamp: event.timestamp,
+        phase: event.data?.newPhase || event.data?.phase,
+        round: event.data?.round || event.round,
+        details: event.data,
+      }));
   }
 
   private handleCreateRoom(
@@ -537,10 +669,20 @@ export class GameSocketServer {
       );
     });
 
+    // FIXED: Enhanced observer update handling with player names
     engine.on("observer_update", (data: any) => {
-      this.playerManager.broadcastToObservers(room.id, "observer_update", data);
+      // Ensure player names are included in observer updates
+      const enhancedData = this.enhanceObserverUpdateWithPlayerNames(
+        data,
+        room
+      );
+
+      this.playerManager.broadcastToObservers(room.id, "observer_update", {
+        update: enhancedData,
+      });
+
       this.broadcastToDashboards("ai_private_action", {
-        ...data,
+        ...enhancedData,
         roomCode: room.code,
         timestamp: new Date().toISOString(),
       });
@@ -550,11 +692,31 @@ export class GameSocketServer {
       "phase_changed",
       (data: { newPhase: string; oldPhase: string; round: number }) => {
         const sanitizedData = this.sanitizeForBroadcast(data);
+
+        // FIXED: Add phase separator message to chat for clear transitions
+        const phaseMessage = {
+          id: uuidv4(),
+          content: `--- ${data.newPhase
+            .toUpperCase()
+            .replace("_", " ")} PHASE BEGINS ---`,
+          timestamp: new Date().toISOString(),
+          messageType: "phase_transition",
+          phase: data.newPhase,
+          round: data.round,
+        };
+
         this.broadcastToRoom(room.id, "phase_changed", sanitizedData);
+        this.broadcastToRoom(room.id, "phase_separator", phaseMessage);
+
         this.playerManager.broadcastToObservers(
           room.id,
           "phase_changed",
           sanitizedData
+        );
+        this.playerManager.broadcastToObservers(
+          room.id,
+          "phase_separator",
+          phaseMessage
         );
 
         const gameState = engine.getSerializableGameState();
@@ -595,6 +757,22 @@ export class GameSocketServer {
     });
 
     // Add other event handlers as needed...
+  }
+
+  // FIXED: New method to enhance observer updates with player names
+  private enhanceObserverUpdateWithPlayerNames(data: any, room: GameRoom): any {
+    if (!data.playerId) return data;
+
+    const player = room.players.get(data.playerId);
+    if (!player) return data;
+
+    return {
+      ...data,
+      playerName: player.name,
+      playerType: player.type,
+      playerModel: player.model,
+      playerRole: player.role,
+    };
   }
 
   private handleMessage(

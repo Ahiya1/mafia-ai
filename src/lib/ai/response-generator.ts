@@ -1,4 +1,4 @@
-// src/lib/ai/response-generator.ts - Real AI Integration for Mafia Game
+// src/lib/ai/response-generator.ts - FIXED: Added reasoning to night action responses
 import {
   AIActionRequest,
   AIResponse,
@@ -112,19 +112,23 @@ export class AIResponseGenerator {
   }
 
   /**
-   * Generate night action using real AI
+   * FIXED: Generate night action using real AI with reasoning
    */
   async generateNightActionResponse(
     context: AIDecisionContext,
     personality: AIPersonality,
     availableTargets: PlayerId[]
-  ): Promise<{ action: "kill" | "heal"; targetId: PlayerId | null }> {
+  ): Promise<{
+    action: "kill" | "heal";
+    targetId: PlayerId | null;
+    reasoning: string;
+  }> {
     const request: AIActionRequest = {
       type: "night_action",
       context: this.enhanceContext(context),
       personality,
       constraints: {
-        maxLength: 100,
+        maxLength: 150,
         availableTargets,
         timeLimit: 45000,
       },
@@ -325,15 +329,16 @@ export class AIResponseGenerator {
   }
 
   /**
-   * Parse night action response from AI
+   * FIXED: Parse night action response from AI with reasoning
    */
   private parseNightActionResponse(
     response: AIResponse,
     role: PlayerRole,
     availableTargets: PlayerId[]
-  ): { action: "kill" | "heal"; targetId: PlayerId | null } {
+  ): { action: "kill" | "heal"; targetId: PlayerId | null; reasoning: string } {
     const content = response.content.toLowerCase();
     const action = role === PlayerRole.MAFIA_LEADER ? "kill" : "heal";
+    let reasoning = response.content.trim();
 
     // Try to extract target from AI response
     let targetId: PlayerId | null = null;
@@ -364,12 +369,32 @@ export class AIResponseGenerator {
     if (!targetId && availableTargets.length > 0) {
       targetId =
         availableTargets[Math.floor(Math.random() * availableTargets.length)];
+      reasoning =
+        action === "kill"
+          ? "Strategic elimination based on threat assessment"
+          : "Protective decision based on vulnerability analysis";
       console.log(
         `🎯 AI didn't specify clear target, selected random: ${targetId}`
       );
+    } else if (!targetId) {
+      // No targets available
+      reasoning =
+        action === "kill"
+          ? "No suitable targets identified this round"
+          : "No one requires protection at this time";
     }
 
-    return { action, targetId };
+    // Clean up reasoning text
+    reasoning =
+      reasoning
+        .replace(/^(?:I (?:will|would|want to) |Let me )/i, "")
+        .replace(/^(?:kill|eliminate|target|protect|heal|save)/i, "")
+        .trim() ||
+      (action === "kill"
+        ? "Strategic decision based on game analysis"
+        : "Protective strategy based on current threats");
+
+    return { action, targetId, reasoning };
   }
 
   /**
@@ -517,7 +542,11 @@ export class AIResponseGenerator {
         return "I need to make a decision based on what I've observed.";
 
       case "night_action":
-        return "Making my choice strategically.";
+        return personality.archetype === "analytical_detective"
+          ? "Making a calculated strategic decision."
+          : personality.archetype === "creative_storyteller"
+          ? "Following my instincts on this choice."
+          : "Choosing based on current game state.";
 
       default:
         return "I'm considering my options.";

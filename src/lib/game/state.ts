@@ -1,4 +1,4 @@
-// src/lib/game/state.ts - Enhanced State Management for AI Mafia
+// src/lib/game/state.ts - FIXED: Enhanced Observer Data Persistence
 import { EventEmitter } from "events";
 import {
   GameState,
@@ -37,6 +37,39 @@ export interface ObserverUpdate {
   playerId: PlayerId;
   timestamp: Date;
   phase: GamePhase;
+  // FIXED: Added enhanced fields for better observer experience
+  playerName?: string;
+  playerType?: string;
+  playerModel?: string;
+  playerRole?: string;
+  round?: number;
+  context?: any;
+}
+
+// FIXED: Enhanced serializable observer data structure
+export interface SerializableObserverData {
+  observerUpdates: Array<{
+    type: string;
+    content: string;
+    playerId: string;
+    timestamp: string;
+    phase: string;
+    playerName?: string;
+    playerType?: string;
+    playerModel?: string;
+    playerRole?: string;
+    round?: number;
+    context?: any;
+  }>;
+  suspicionMatrix: Record<string, Record<string, number>>;
+  gameAnalytics: any;
+  phaseHistory: Array<{
+    phase: string;
+    timestamp: string;
+    round: number;
+    duration?: number;
+    actions?: number;
+  }>;
 }
 
 export class GameStateManager extends EventEmitter {
@@ -47,6 +80,14 @@ export class GameStateManager extends EventEmitter {
   private playerSuspicionMatrix: Map<PlayerId, Map<PlayerId, number>> =
     new Map();
   private phaseActionCounts: Map<GamePhase, number> = new Map();
+  // FIXED: Added phase history tracking for observer persistence
+  private phaseHistory: Array<{
+    phase: GamePhase;
+    timestamp: Date;
+    round: number;
+    duration?: number;
+    actions?: number;
+  }> = [];
 
   constructor(gameState: GameState) {
     super();
@@ -109,6 +150,7 @@ export class GameStateManager extends EventEmitter {
     this.logAction(player.id, "player_joined", {
       playerType: player.type,
       playerName: player.name,
+      playerModel: player.model,
     });
 
     this.emit("player_added", { player });
@@ -225,13 +267,18 @@ export class GameStateManager extends EventEmitter {
         : undefined,
     });
 
-    // Add observer update for spectators
+    // FIXED: Add enhanced observer update for spectators
     this.addObserverUpdate({
       type: action.action === "kill" ? "private_action" : "private_action",
       content: this.formatNightActionForObservers(action, player),
       playerId: action.playerId,
       timestamp: new Date(),
       phase: this.gameState.phase,
+      playerName: player.name,
+      playerType: player.type,
+      playerModel: player.model,
+      playerRole: player.role,
+      round: this.gameState.currentRound,
     });
 
     this.emit("night_action_added", { action });
@@ -260,6 +307,22 @@ export class GameStateManager extends EventEmitter {
       role: player.role,
       round: this.gameState.currentRound,
       phase: this.gameState.phase,
+      playerName: player.name,
+    });
+
+    // FIXED: Add observer update for elimination
+    this.addObserverUpdate({
+      type: "private_action",
+      content: `💀 ${player.name} (${player.role}) was eliminated by ${
+        cause === "voted_out" ? "voting" : "mafia"
+      }`,
+      playerId: playerId,
+      timestamp: new Date(),
+      phase: this.gameState.phase,
+      playerName: player.name,
+      playerType: player.type,
+      playerRole: player.role,
+      round: this.gameState.currentRound,
     });
 
     // Update suspicion patterns based on elimination
@@ -302,6 +365,7 @@ export class GameStateManager extends EventEmitter {
         isAlive: p.isAlive,
         isReady: p.isReady,
         lastActive: p.lastActive,
+        model: p.model,
         // Only show role for the requesting player or if game is over
         role:
           p.id === playerId || this.gameState.phase === GamePhase.GAME_OVER
@@ -320,41 +384,73 @@ export class GameStateManager extends EventEmitter {
   }
 
   /**
-   * Get observer state (shows everything for spectators)
+   * FIXED: Enhanced observer state with complete serializable data
    */
-  getObserverGameState(): any {
+  getObserverGameState(): SerializableObserverData {
     const state = this.getGameState();
 
     return {
-      ...state,
-      players: Array.from(state.players.values()).map((p) => ({
-        ...p,
-        suspicionLevel: this.getPlayerSuspicionLevel(p.id),
-        trustLevel: this.getPlayerTrustLevel(p.id),
-        actionCount: this.getPlayerActionCount(p.id),
+      observerUpdates: this.observerUpdates.map((update) => ({
+        type: update.type,
+        content: update.content,
+        playerId: update.playerId,
+        timestamp: update.timestamp.toISOString(),
+        phase: update.phase,
+        playerName: update.playerName,
+        playerType: update.playerType,
+        playerModel: update.playerModel,
+        playerRole: update.playerRole,
+        round: update.round,
+        context: update.context,
       })),
-      observerUpdates: [...this.observerUpdates],
       suspicionMatrix: this.getSuspicionMatrixForObservers(),
       gameAnalytics: this.getGameAnalytics(),
+      phaseHistory: this.phaseHistory.map((phase) => ({
+        phase: phase.phase,
+        timestamp: phase.timestamp.toISOString(),
+        round: phase.round,
+        duration: phase.duration,
+        actions: phase.actions,
+      })),
     };
   }
 
   /**
-   * Add private update for observers (mafia chat, healer thoughts, etc.)
+   * FIXED: Enhanced observer update with complete player context
    */
   addObserverUpdate(update: ObserverUpdate): void {
-    this.observerUpdates.push({ ...update });
+    // Ensure player information is included
+    const player = this.gameState.players.get(update.playerId);
+    const enhancedUpdate: ObserverUpdate = {
+      ...update,
+      playerName: player?.name || update.playerName,
+      playerType: player?.type || update.playerType,
+      playerModel: player?.model || update.playerModel,
+      playerRole: player?.role || update.playerRole,
+      round: this.gameState.currentRound,
+      context: {
+        phase: this.gameState.phase,
+        round: this.gameState.currentRound,
+        alivePlayers: Array.from(this.gameState.players.values()).filter(
+          (p) => p.isAlive
+        ).length,
+        totalPlayers: this.gameState.players.size,
+        ...update.context,
+      },
+    };
 
-    // Keep only recent updates (last 50)
-    if (this.observerUpdates.length > 50) {
-      this.observerUpdates = this.observerUpdates.slice(-50);
+    this.observerUpdates.push(enhancedUpdate);
+
+    // Keep only recent updates (last 100 for performance)
+    if (this.observerUpdates.length > 100) {
+      this.observerUpdates = this.observerUpdates.slice(-100);
     }
 
-    this.emit("observer_update", { update });
+    this.emit("observer_update", { update: enhancedUpdate });
   }
 
   /**
-   * Add mafia coordination message for observers
+   * FIXED: Add mafia coordination message with enhanced context
    */
   addMafiaChat(mafiaPlayerId: PlayerId, content: string): void {
     this.addObserverUpdate({
@@ -367,7 +463,7 @@ export class GameStateManager extends EventEmitter {
   }
 
   /**
-   * Add healer reasoning for observers
+   * FIXED: Add healer reasoning with enhanced context
    */
   addHealerThoughts(healerPlayerId: PlayerId, content: string): void {
     this.addObserverUpdate({
@@ -380,7 +476,7 @@ export class GameStateManager extends EventEmitter {
   }
 
   /**
-   * Add AI reasoning for observers
+   * FIXED: Add AI reasoning with enhanced context
    */
   addAIReasoning(aiPlayerId: PlayerId, reasoning: string): void {
     this.addObserverUpdate({
@@ -393,6 +489,107 @@ export class GameStateManager extends EventEmitter {
   }
 
   /**
+   * FIXED: Serialize observer data for persistence
+   */
+  serializeObserverData(): string {
+    try {
+      const data = this.getObserverGameState();
+      return JSON.stringify(data);
+    } catch (error) {
+      console.error("Failed to serialize observer data:", error);
+      return JSON.stringify({
+        observerUpdates: [],
+        suspicionMatrix: {},
+        gameAnalytics: {},
+        phaseHistory: [],
+      });
+    }
+  }
+
+  /**
+   * FIXED: Deserialize observer data from persistence
+   */
+  deserializeObserverData(serializedData: string): boolean {
+    try {
+      const data: SerializableObserverData = JSON.parse(serializedData);
+
+      // Restore observer updates
+      this.observerUpdates = data.observerUpdates.map((update) => ({
+        type: update.type as any,
+        content: update.content,
+        playerId: update.playerId,
+        timestamp: new Date(update.timestamp),
+        phase: update.phase as GamePhase,
+        playerName: update.playerName,
+        playerType: update.playerType,
+        playerModel: update.playerModel,
+        playerRole: update.playerRole,
+        round: update.round,
+        context: update.context,
+      }));
+
+      // Restore phase history
+      this.phaseHistory = data.phaseHistory.map((phase) => ({
+        phase: phase.phase as GamePhase,
+        timestamp: new Date(phase.timestamp),
+        round: phase.round,
+        duration: phase.duration,
+        actions: phase.actions,
+      }));
+
+      console.log(
+        `✅ Restored ${this.observerUpdates.length} observer updates and ${this.phaseHistory.length} phase history entries`
+      );
+      return true;
+    } catch (error) {
+      console.error("Failed to deserialize observer data:", error);
+      return false;
+    }
+  }
+
+  /**
+   * FIXED: Merge observer data from external source (for observer rejoin)
+   */
+  mergeObserverData(externalData: SerializableObserverData): void {
+    try {
+      // Merge observer updates (avoid duplicates by timestamp)
+      const existingTimestamps = new Set(
+        this.observerUpdates.map((u) => u.timestamp.toISOString())
+      );
+
+      const newUpdates = externalData.observerUpdates
+        .filter((update) => !existingTimestamps.has(update.timestamp))
+        .map((update) => ({
+          type: update.type as any,
+          content: update.content,
+          playerId: update.playerId,
+          timestamp: new Date(update.timestamp),
+          phase: update.phase as GamePhase,
+          playerName: update.playerName,
+          playerType: update.playerType,
+          playerModel: update.playerModel,
+          playerRole: update.playerRole,
+          round: update.round,
+          context: update.context,
+        }));
+
+      this.observerUpdates.push(...newUpdates);
+      this.observerUpdates.sort(
+        (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+      );
+
+      // Keep reasonable limit
+      if (this.observerUpdates.length > 100) {
+        this.observerUpdates = this.observerUpdates.slice(-100);
+      }
+
+      console.log(`✅ Merged ${newUpdates.length} new observer updates`);
+    } catch (error) {
+      console.error("Failed to merge observer data:", error);
+    }
+  }
+
+  /**
    * Get action log for analytics
    */
   getActionLog(): PlayerActionLog[] {
@@ -400,35 +597,60 @@ export class GameStateManager extends EventEmitter {
   }
 
   /**
-   * Get observer updates
+   * Get observer updates (with optional filtering)
    */
-  getObserverUpdates(): ObserverUpdate[] {
-    return [...this.observerUpdates];
+  getObserverUpdates(type?: string, limit?: number): ObserverUpdate[] {
+    let updates = [...this.observerUpdates];
+
+    if (type) {
+      updates = updates.filter((update) => update.type === type);
+    }
+
+    if (limit) {
+      updates = updates.slice(-limit);
+    }
+
+    return updates;
   }
 
   /**
-   * Get game analytics for observers
+   * FIXED: Enhanced game analytics with more detailed insights
    */
   getGameAnalytics(): any {
     const players = Array.from(this.gameState.players.values());
     const aiPlayers = players.filter((p) => p.type === PlayerType.AI);
     const humanPlayers = players.filter((p) => p.type === PlayerType.HUMAN);
 
+    const currentPhase = this.phaseHistory[this.phaseHistory.length - 1];
+    const phaseDuration = currentPhase
+      ? Date.now() - currentPhase.timestamp.getTime()
+      : 0;
+
     return {
-      duration: Date.now() - this.gameState.phaseStartTime.getTime(),
+      gameId: this.gameState.id,
+      duration: this.gameState.phaseStartTime
+        ? Date.now() - this.gameState.phaseStartTime.getTime()
+        : 0,
+      currentPhaseDuration: phaseDuration,
       rounds: this.gameState.currentRound,
+      currentPhase: this.gameState.phase,
       totalMessages: this.gameState.messages.length,
       totalVotes: this.gameState.votes.length,
       totalNightActions: this.gameState.nightActions.length,
       eliminations: this.gameState.eliminatedPlayers.length,
+      observerUpdates: this.observerUpdates.length,
       playerStats: {
         total: players.length,
         ai: aiPlayers.length,
         human: humanPlayers.length,
         alive: players.filter((p) => p.isAlive).length,
+        eliminated: players.filter((p) => !p.isAlive).length,
       },
+      aiModelDistribution: this.getAIModelDistribution(aiPlayers),
       phaseStats: this.getPhaseStatistics(),
       playerActivity: this.getPlayerActivityStats(),
+      suspicionAnalytics: this.getSuspicionAnalytics(),
+      roleDistribution: this.getRoleDistribution(players),
     };
   }
 
@@ -439,6 +661,7 @@ export class GameStateManager extends EventEmitter {
     this.snapshots = [];
     this.actionLog = [];
     this.observerUpdates = [];
+    this.phaseHistory = [];
     this.playerSuspicionMatrix.clear();
     this.phaseActionCounts.clear();
   }
@@ -484,6 +707,10 @@ export class GameStateManager extends EventEmitter {
       details,
     });
 
+    // Increment phase action count
+    const currentCount = this.phaseActionCounts.get(this.gameState.phase) || 0;
+    this.phaseActionCounts.set(this.gameState.phase, currentCount + 1);
+
     // Keep action log manageable
     if (this.actionLog.length > 1000) {
       this.actionLog = this.actionLog.slice(-500);
@@ -491,15 +718,39 @@ export class GameStateManager extends EventEmitter {
   }
 
   /**
-   * Handle phase change
+   * FIXED: Enhanced phase change handling with history tracking
    */
   private onPhaseChange(oldPhase: GamePhase, newPhase: GamePhase): void {
-    console.log(
-      `📊 Phase analytics: ${oldPhase} had ${
-        this.phaseActionCounts.get(oldPhase) || 0
-      } actions`
-    );
+    const actionCount = this.phaseActionCounts.get(oldPhase) || 0;
+    console.log(`📊 Phase analytics: ${oldPhase} had ${actionCount} actions`);
+
+    // Record phase in history
+    if (this.phaseHistory.length > 0) {
+      const lastPhase = this.phaseHistory[this.phaseHistory.length - 1];
+      lastPhase.duration = Date.now() - lastPhase.timestamp.getTime();
+      lastPhase.actions = actionCount;
+    }
+
+    // Add new phase to history
+    this.phaseHistory.push({
+      phase: newPhase,
+      timestamp: new Date(),
+      round: this.gameState.currentRound,
+    });
+
+    // Initialize action count for new phase
     this.phaseActionCounts.set(newPhase, 0);
+
+    // Add phase change observer update
+    this.addObserverUpdate({
+      type: "private_action",
+      content: `🔄 Phase changed from ${oldPhase} to ${newPhase} (Round ${this.gameState.currentRound})`,
+      playerId: "system",
+      timestamp: new Date(),
+      phase: newPhase,
+      playerName: "System",
+      playerType: "system",
+    });
   }
 
   /**
@@ -635,19 +886,22 @@ export class GameStateManager extends EventEmitter {
       : "No one";
 
     if (action.action === "kill") {
-      return `${player.name} (Mafia) is planning to eliminate ${targetName}`;
+      return `🔪 ${player.name} (Mafia) is planning to eliminate ${targetName}`;
     } else if (action.action === "heal") {
-      return `${player.name} (Healer) is planning to protect ${targetName}`;
+      return `🛡️ ${player.name} (Healer) is planning to protect ${targetName}`;
     }
 
-    return `${player.name} is taking a night action`;
+    return `🌙 ${player.name} is taking a night action`;
   }
 
   /**
    * Get suspicion matrix for observers
    */
-  private getSuspicionMatrixForObservers(): any {
-    const matrix: any = {};
+  private getSuspicionMatrixForObservers(): Record<
+    string,
+    Record<string, number>
+  > {
+    const matrix: Record<string, Record<string, number>> = {};
 
     for (const [
       suspectorId,
@@ -704,11 +958,21 @@ export class GameStateManager extends EventEmitter {
   /**
    * Get phase statistics
    */
-  private getPhaseStatistics(): any {
-    const phaseStats: any = {};
+  private getPhaseStatistics(): Record<string, any> {
+    const phaseStats: Record<string, any> = {};
 
     for (const [phase, count] of this.phaseActionCounts.entries()) {
       phaseStats[phase] = count;
+    }
+
+    // Add phase duration statistics
+    for (const phaseEntry of this.phaseHistory) {
+      const phaseKey = phaseEntry.phase;
+      if (!phaseStats[phaseKey]) {
+        phaseStats[phaseKey] = {};
+      }
+      phaseStats[phaseKey].duration = phaseEntry.duration;
+      phaseStats[phaseKey].actions = phaseEntry.actions;
     }
 
     return phaseStats;
@@ -717,8 +981,8 @@ export class GameStateManager extends EventEmitter {
   /**
    * Get player activity statistics
    */
-  private getPlayerActivityStats(): any {
-    const stats: any = {};
+  private getPlayerActivityStats(): Record<string, any> {
+    const stats: Record<string, any> = {};
 
     for (const [playerId, player] of this.gameState.players.entries()) {
       const playerActions = this.actionLog.filter(
@@ -731,10 +995,66 @@ export class GameStateManager extends EventEmitter {
         votes: playerActions.filter((a) => a.action === "vote_cast").length,
         nightActions: playerActions.filter((a) => a.action === "night_action")
           .length,
+        suspicionLevel: this.getPlayerSuspicionLevel(playerId),
+        trustLevel: this.getPlayerTrustLevel(playerId),
       };
     }
 
     return stats;
+  }
+
+  /**
+   * FIXED: New method to get AI model distribution
+   */
+  private getAIModelDistribution(aiPlayers: Player[]): Record<string, number> {
+    const distribution: Record<string, number> = {};
+
+    for (const player of aiPlayers) {
+      if (player.model) {
+        distribution[player.model] = (distribution[player.model] || 0) + 1;
+      }
+    }
+
+    return distribution;
+  }
+
+  /**
+   * FIXED: New method to get suspicion analytics
+   */
+  private getSuspicionAnalytics(): any {
+    const suspicionLevels: Record<string, number> = {};
+    const trustLevels: Record<string, number> = {};
+
+    for (const [playerId, player] of this.gameState.players.entries()) {
+      suspicionLevels[player.name] = this.getPlayerSuspicionLevel(playerId);
+      trustLevels[player.name] = this.getPlayerTrustLevel(playerId);
+    }
+
+    return {
+      suspicionLevels,
+      trustLevels,
+      averageSuspicion:
+        Object.values(suspicionLevels).reduce((a, b) => a + b, 0) /
+          Object.values(suspicionLevels).length || 0,
+      averageTrust:
+        Object.values(trustLevels).reduce((a, b) => a + b, 0) /
+          Object.values(trustLevels).length || 0,
+    };
+  }
+
+  /**
+   * FIXED: New method to get role distribution
+   */
+  private getRoleDistribution(players: Player[]): Record<string, number> {
+    const distribution: Record<string, number> = {};
+
+    for (const player of players) {
+      if (player.role) {
+        distribution[player.role] = (distribution[player.role] || 0) + 1;
+      }
+    }
+
+    return distribution;
   }
 
   /**
@@ -745,6 +1065,7 @@ export class GameStateManager extends EventEmitter {
     this.snapshots = [];
     this.actionLog = [];
     this.observerUpdates = [];
+    this.phaseHistory = [];
     this.playerSuspicionMatrix.clear();
     this.phaseActionCounts.clear();
   }
