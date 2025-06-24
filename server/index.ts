@@ -261,20 +261,17 @@ app.use(
   })
 );
 
-// Rate limiting
-// Rate limiting - Simplified for Railway deployment
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000", 10),
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "200", 10),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: "Too many requests from this IP, please try again later.",
-  skip: () => process.env.NODE_ENV === "development",
-  // 🔥 FIX: Disable proxy validations for Railway
-  validate: false, // This disables all validations
-});
-
-app.use(limiter);
+// Rate limiting - DISABLED FOR NOW
+// const limiter = rateLimit({
+//   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000", 10),
+//   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "200", 10),
+//   standardHeaders: true,
+//   legacyHeaders: false,
+//   message: "Too many requests from this IP, please try again later.",
+//   skip: () => process.env.NODE_ENV === "development",
+//   validate: false,
+// });
+// app.use(limiter);
 
 // CORS configuration
 const allowedOrigins = [
