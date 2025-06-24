@@ -1,4 +1,4 @@
-// server/socket/game-server.ts - FIXED: Enhanced Observer Support with Complete History
+// server/socket/game-server.ts - FIXED: Emergency Debug Endpoints for Production Troubleshooting
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
 import { MafiaGameEngine } from "../lib/game/engine";
@@ -38,6 +38,7 @@ export class GameSocketServer {
     this.playerManager = new PlayerManager();
 
     this.setupSocketHandlers();
+    this.setupDebugEndpoints(); // 🔥 NEW: Initialize debug endpoints
 
     // Cleanup interval
     setInterval(() => {
@@ -50,7 +51,283 @@ export class GameSocketServer {
     }, 2000);
 
     console.log(
-      "🚀 Game Socket Server initialized with enhanced observer persistence"
+      "🚀 Game Socket Server initialized with emergency debug endpoints"
+    );
+  }
+
+  /**
+   * 🔥 CRITICAL PRODUCTION FIX: Emergency debug endpoints for stuck games
+   */
+  private setupDebugEndpoints(): void {
+    const express = require("express");
+    const app = express();
+    app.use(express.json());
+
+    // 🔥 DEBUG ENDPOINT 1: Game state inspection
+    app.get("/api/debug/game/:roomId", (req: any, res: any) => {
+      try {
+        const { roomId } = req.params;
+        const room = this.roomManager.getRoomById(roomId);
+
+        if (!room) {
+          return res.status(404).json({
+            error: "Room not found",
+            roomId,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        const debugInfo = {
+          room: {
+            id: room.id,
+            code: room.code,
+            playerCount: room.players.size,
+            gameInProgress: !!room.gameEngine,
+            createdAt: room.createdAt.toISOString(),
+          },
+          players: Array.from(room.players.values()).map((p) => ({
+            id: p.id,
+            name: p.name,
+            type: p.type,
+            role: p.role,
+            isAlive: p.isAlive,
+            isReady: p.isReady,
+          })),
+          gameState: room.gameEngine
+            ? room.gameEngine.getSerializableGameState()
+            : null,
+          debugData: room.gameEngine ? room.gameEngine.getDebugInfo() : null,
+          stuckStateIssues: room.gameEngine
+            ? room.gameEngine.getStuckStateIssues()
+            : [],
+          timestamp: new Date().toISOString(),
+        };
+
+        console.log(`🔍 Debug info requested for room ${room.code}`);
+
+        res.json({
+          success: true,
+          debugInfo,
+          responseTime: Date.now(),
+        });
+      } catch (error) {
+        console.error("❌ Debug endpoint error:", error);
+        res.status(500).json({
+          error: "Internal server error",
+          message: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    // 🔥 DEBUG ENDPOINT 2: Emergency force vote progression
+    app.post(
+      "/api/debug/force-vote-progression/:roomId",
+      (req: any, res: any) => {
+        try {
+          const { roomId } = req.params;
+          const { reason = "Emergency admin intervention" } = req.body;
+
+          const room = this.roomManager.getRoomById(roomId);
+
+          if (!room || !room.gameEngine) {
+            return res.status(404).json({
+              error: "Room or game engine not found",
+              roomId,
+              timestamp: new Date().toISOString(),
+            });
+          }
+
+          const gameState = room.gameEngine.getGameState();
+          const beforeState = {
+            phase: gameState.phase,
+            currentSpeaker: gameState.currentSpeaker,
+            votes: gameState.votes.length,
+            stuckIssues: room.gameEngine.getStuckStateIssues(),
+          };
+
+          // Force vote progression
+          const success = room.gameEngine.forceVoteProgression();
+
+          const afterState = {
+            phase: room.gameEngine.getGameState().phase,
+            currentSpeaker: room.gameEngine.getGameState().currentSpeaker,
+            votes: room.gameEngine.getGameState().votes.length,
+            stuckIssues: room.gameEngine.getStuckStateIssues(),
+          };
+
+          console.log(
+            `🔧 Emergency vote progression forced for room ${room.code}: ${reason}`
+          );
+
+          // Broadcast emergency action to all players and observers
+          this.broadcastToRoom(room.id, "emergency_action", {
+            type: "force_vote_progression",
+            reason,
+            beforeState,
+            afterState,
+            timestamp: new Date().toISOString(),
+          });
+
+          res.json({
+            success,
+            message: success
+              ? "Vote progression forced successfully"
+              : "Failed to force progression",
+            reason,
+            beforeState,
+            afterState,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.error("❌ Emergency vote progression error:", error);
+          res.status(500).json({
+            error: "Failed to force vote progression",
+            message: error instanceof Error ? error.message : String(error),
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    );
+
+    // 🔥 DEBUG ENDPOINT 3: Find all stuck games
+    app.get("/api/debug/stuck-games", (req: any, res: any) => {
+      try {
+        const allRooms = this.roomManager.getAllRooms();
+        const stuckGames: Array<any> = [];
+
+        for (const room of allRooms) {
+          if (room.gameEngine) {
+            const stuckIssues = room.gameEngine.getStuckStateIssues();
+            if (stuckIssues.length > 0) {
+              const gameState = room.gameEngine.getGameState();
+              stuckGames.push({
+                roomId: room.id,
+                roomCode: room.code,
+                phase: gameState.phase,
+                round: gameState.currentRound,
+                playerCount: room.players.size,
+                stuckIssues,
+                gameAge: Date.now() - room.createdAt.getTime(),
+                debugInfo: room.gameEngine.getDebugInfo(),
+              });
+            }
+          }
+        }
+
+        console.log(
+          `🔍 Stuck games scan: ${stuckGames.length} games with issues found`
+        );
+
+        res.json({
+          success: true,
+          stuckGamesCount: stuckGames.length,
+          totalActiveGames: allRooms.filter((r) => r.gameEngine).length,
+          stuckGames: stuckGames.map((game) => ({
+            ...game,
+            emergencyFixUrl: `/api/debug/force-vote-progression/${game.roomId}`,
+            inspectUrl: `/api/debug/game/${game.roomId}`,
+          })),
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.error("❌ Stuck games scan error:", error);
+        res.status(500).json({
+          error: "Failed to scan for stuck games",
+          message: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    // 🔥 BONUS DEBUG ENDPOINT: Comprehensive server health check
+    app.get("/api/debug/server-health", (req: any, res: any) => {
+      try {
+        const rooms = this.roomManager.getAllRooms();
+        const connections = this.playerManager.getConnectionStats();
+
+        const health = {
+          server: {
+            uptime: process.uptime(),
+            memoryUsage: process.memoryUsage(),
+            startTime: this.serverStartTime.toISOString(),
+            version: process.version,
+          },
+          rooms: {
+            total: rooms.length,
+            active: rooms.filter((r) => r.gameEngine).length,
+            stuck: rooms.filter(
+              (r) =>
+                r.gameEngine && r.gameEngine.getStuckStateIssues().length > 0
+            ).length,
+          },
+          players: connections,
+          ai: {
+            usageStats: this.getAIUsageStats(),
+            personalitiesAvailable: true,
+          },
+          dashboards: {
+            connected: this.dashboardSockets.size,
+          },
+          metrics: {
+            totalGamesCreated: this.totalGamesCreated,
+            totalPlayersServed: this.totalPlayersServed,
+          },
+          timestamp: new Date().toISOString(),
+        };
+
+        res.json({
+          success: true,
+          healthy: health.rooms.stuck === 0,
+          health,
+        });
+      } catch (error) {
+        console.error("❌ Health check error:", error);
+        res.status(500).json({
+          success: false,
+          healthy: false,
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    // 🔥 EMERGENCY ENDPOINT: Terminate stuck room
+    app.post("/api/debug/terminate-room/:roomId", (req: any, res: any) => {
+      try {
+        const { roomId } = req.params;
+        const { reason = "Emergency termination due to stuck state" } =
+          req.body;
+
+        const terminationResult = this.terminateRoom(roomId, reason);
+
+        res.json({
+          success: terminationResult.success,
+          message: terminationResult.success
+            ? "Room terminated successfully"
+            : terminationResult.message,
+          terminationInfo: terminationResult,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.error("❌ Room termination error:", error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    console.log("🔥 Emergency debug endpoints initialized:");
+    console.log("  GET  /api/debug/game/:roomId - Game state inspection");
+    console.log(
+      "  POST /api/debug/force-vote-progression/:roomId - Emergency fix"
+    );
+    console.log("  GET  /api/debug/stuck-games - Find hung games");
+    console.log("  GET  /api/debug/server-health - Comprehensive health check");
+    console.log(
+      "  POST /api/debug/terminate-room/:roomId - Emergency room termination"
     );
   }
 
@@ -67,7 +344,7 @@ export class GameSocketServer {
         return;
       }
 
-      // FIXED: Enhanced join_room handler with proper observer support
+      // Enhanced join_room handler with proper observer support
       socket.on(
         "join_room",
         (data: {
@@ -98,10 +375,84 @@ export class GameSocketServer {
         this.handlePlayerReady(socket, data.playerId);
       });
 
+      // 🔥 NEW: Emergency debug socket events
+      socket.on("debug_request", (data: { type: string; roomId?: string }) => {
+        this.handleDebugRequest(socket, data);
+      });
+
       socket.on("disconnect", () => {
         this.handleDisconnect(socket);
       });
     });
+  }
+
+  /**
+   * 🔥 NEW: Handle debug requests via socket
+   */
+  private handleDebugRequest(
+    socket: Socket,
+    data: { type: string; roomId?: string }
+  ): void {
+    try {
+      switch (data.type) {
+        case "game_state":
+          if (data.roomId) {
+            const room = this.roomManager.getRoomById(data.roomId);
+            if (room && room.gameEngine) {
+              socket.emit("debug_response", {
+                type: "game_state",
+                data: room.gameEngine.getDebugInfo(),
+                timestamp: new Date().toISOString(),
+              });
+            }
+          }
+          break;
+
+        case "stuck_check":
+          if (data.roomId) {
+            const room = this.roomManager.getRoomById(data.roomId);
+            if (room && room.gameEngine) {
+              socket.emit("debug_response", {
+                type: "stuck_check",
+                data: {
+                  isStuck: room.gameEngine.getStuckStateIssues().length > 0,
+                  issues: room.gameEngine.getStuckStateIssues(),
+                },
+                timestamp: new Date().toISOString(),
+              });
+            }
+          }
+          break;
+
+        case "server_health":
+          socket.emit("debug_response", {
+            type: "server_health",
+            data: this.getServerHealthSummary(),
+            timestamp: new Date().toISOString(),
+          });
+          break;
+      }
+    } catch (error) {
+      socket.emit("debug_error", {
+        error: "Debug request failed",
+        message: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  private getServerHealthSummary(): any {
+    const rooms = this.roomManager.getAllRooms();
+    return {
+      uptime: process.uptime(),
+      totalRooms: rooms.length,
+      activeGames: rooms.filter((r) => r.gameEngine).length,
+      stuckGames: rooms.filter(
+        (r) => r.gameEngine && r.gameEngine.getStuckStateIssues().length > 0
+      ).length,
+      totalConnections: this.playerManager.getAllConnections().length,
+      dashboardConnections: this.dashboardSockets.size,
+    };
   }
 
   private handleDashboardConnection(socket: Socket): void {
@@ -116,7 +467,7 @@ export class GameSocketServer {
     });
   }
 
-  // FIXED: Proper room joining logic with observer support
+  // Proper room joining logic with observer support
   private handleJoinRoom(
     socket: Socket,
     data: {
@@ -143,7 +494,7 @@ export class GameSocketServer {
       `🔍 Join attempt - Room: ${data.roomCode}, Observer: ${isObserver}, Player: ${data.playerName}`
     );
 
-    // FIXED: Use proper capacity checking
+    // Use proper capacity checking
     const canJoin = this.roomManager.canJoinRoom(room, isObserver);
     if (!canJoin.canJoin) {
       console.log(`❌ Cannot join room: ${canJoin.reason}`);
@@ -190,7 +541,7 @@ export class GameSocketServer {
       room.gameEngine.addPlayer(player);
     }
 
-    // FIXED: Fill with AI players AFTER human player is added
+    // Fill with AI players AFTER human player is added
     this.fillWithAIPlayers(room);
 
     // Send success response
@@ -235,7 +586,7 @@ export class GameSocketServer {
     );
   }
 
-  // FIXED: Enhanced observer joining with complete accumulated history
+  // Enhanced observer joining with complete accumulated history
   private handleObserverJoin(
     socket: Socket,
     room: GameRoom,
@@ -251,7 +602,7 @@ export class GameSocketServer {
     socket.join(room.id + "_observers");
     socket.join(room.id); // Also join main room for game events
 
-    // FIXED: Get complete observer history from game engine
+    // Get complete observer history from game engine
     const completeObserverData = this.getCompleteObserverHistory(room);
 
     // Send enhanced observer joined response with complete history
@@ -270,12 +621,12 @@ export class GameSocketServer {
       })),
       gameState: room.gameEngine?.getSerializableGameState(),
       observerMode: true,
-      // FIXED: Include complete accumulated observer data
+      // Include complete accumulated observer data
       observerData: completeObserverData,
       joinTimestamp: new Date().toISOString(),
     });
 
-    // FIXED: Send all accumulated observer updates individually for real-time display
+    // Send all accumulated observer updates individually for real-time display
     if (completeObserverData.observerUpdates.length > 0) {
       console.log(
         `📊 Sending ${completeObserverData.observerUpdates.length} accumulated observer updates`
@@ -318,7 +669,7 @@ export class GameSocketServer {
     );
   }
 
-  // FIXED: New method to get complete observer history
+  // New method to get complete observer history
   private getCompleteObserverHistory(room: GameRoom): any {
     if (!room.gameEngine) {
       return {
@@ -379,7 +730,7 @@ export class GameSocketServer {
     };
   }
 
-  // FIXED: New method to build phase history for observers
+  // New method to build phase history for observers
   private buildPhaseHistory(room: GameRoom): any[] {
     if (!room.gameEngine) return [];
 
@@ -408,7 +759,7 @@ export class GameSocketServer {
   ): void {
     const playerId = uuidv4();
 
-    // FIXED: Use room manager for creation
+    // Use room manager for creation
     const { room, roomCode } = this.roomManager.createRoom(
       playerId,
       data.playerName,
@@ -422,7 +773,7 @@ export class GameSocketServer {
     socket.join(room.id);
     this.totalGamesCreated++;
 
-    // FIXED: Fill with AI players immediately after creation
+    // Fill with AI players immediately after creation
     this.fillWithAIPlayers(room);
 
     const player = room.players.get(playerId)!;
@@ -455,7 +806,7 @@ export class GameSocketServer {
   }
 
   /**
-   * FIXED: Enhanced AI player filling logic
+   * Enhanced AI player filling logic
    */
   private fillWithAIPlayers(room: GameRoom): void {
     const humanPlayerCount = Array.from(room.players.values()).filter(
@@ -669,7 +1020,7 @@ export class GameSocketServer {
       );
     });
 
-    // FIXED: Enhanced observer update handling with player names
+    // Enhanced observer update handling with player names
     engine.on("observer_update", (data: any) => {
       // Ensure player names are included in observer updates
       const enhancedData = this.enhanceObserverUpdateWithPlayerNames(
@@ -693,7 +1044,7 @@ export class GameSocketServer {
       (data: { newPhase: string; oldPhase: string; round: number }) => {
         const sanitizedData = this.sanitizeForBroadcast(data);
 
-        // FIXED: Add phase separator message to chat for clear transitions
+        // Add phase separator message to chat for clear transitions
         const phaseMessage = {
           id: uuidv4(),
           content: `--- ${data.newPhase
@@ -759,7 +1110,7 @@ export class GameSocketServer {
     // Add other event handlers as needed...
   }
 
-  // FIXED: New method to enhance observer updates with player names
+  // New method to enhance observer updates with player names
   private enhanceObserverUpdateWithPlayerNames(data: any, room: GameRoom): any {
     if (!data.playerId) return data;
 

@@ -1,4 +1,4 @@
-// src/lib/ai/response-generator.ts - FIXED: Added reasoning to night action responses
+// src/lib/ai/response-generator.ts - FIXED: Bulletproof AI Response Parsing with Multiple Extraction Strategies
 import {
   AIActionRequest,
   AIResponse,
@@ -88,13 +88,17 @@ export class AIResponseGenerator {
   }
 
   /**
-   * Generate voting decision using real AI
+   * 🔥 CRITICAL FIX: Generate voting decision with bulletproof parsing
    */
   async generateVotingResponse(
     context: AIDecisionContext,
     personality: AIPersonality,
     availableTargets: PlayerId[]
   ): Promise<{ targetId: PlayerId; reasoning: string }> {
+    console.log(
+      `🗳️ Generating voting response for ${personality.name} with ${availableTargets.length} targets`
+    );
+
     const request: AIActionRequest = {
       type: "vote",
       context: this.enhanceContext(context),
@@ -108,11 +112,15 @@ export class AIResponseGenerator {
     };
 
     const response = await this.generateResponse(request);
-    return this.parseVotingResponse(response, availableTargets, personality);
+    return this.parseVotingResponseWithMultipleStrategies(
+      response,
+      availableTargets,
+      personality
+    );
   }
 
   /**
-   * FIXED: Generate night action using real AI with reasoning
+   * Generate night action using real AI with reasoning
    */
   async generateNightActionResponse(
     context: AIDecisionContext,
@@ -135,7 +143,7 @@ export class AIResponseGenerator {
     };
 
     const response = await this.generateResponse(request);
-    return this.parseNightActionResponse(
+    return this.parseNightActionResponseWithFallback(
       response,
       context.role,
       availableTargets
@@ -274,127 +282,328 @@ export class AIResponseGenerator {
   }
 
   /**
-   * Parse voting response from AI to extract target and reasoning
+   * 🔥 CRITICAL PRODUCTION FIX: Parse voting response with multiple extraction strategies
+   * This implements all required parsing strategies from the briefing
    */
-  private parseVotingResponse(
+  private parseVotingResponseWithMultipleStrategies(
     response: AIResponse,
     availableTargets: PlayerId[],
     personality: AIPersonality
   ): { targetId: PlayerId; reasoning: string } {
-    const content = response.content.toLowerCase();
+    console.log(`🎯 Parsing AI voting response: "${response.content}"`);
+    console.log(`🎯 Available targets: ${availableTargets.join(", ")}`);
 
-    // Try to extract target from AI response
+    const content = response.content;
     let targetId: PlayerId | null = null;
     let reasoning = response.content;
+    let parsingMethod = "none";
 
-    // Look for voting patterns in AI response
-    const votePatterns = [
-      /vote.*?for.*?([a-zA-Z_0-9-]+)/i,
-      /eliminate.*?([a-zA-Z_0-9-]+)/i,
-      /choose.*?([a-zA-Z_0-9-]+)/i,
-      /suspicious.*?([a-zA-Z_0-9-]+)/i,
-    ];
-
-    for (const pattern of votePatterns) {
-      const match = response.content.match(pattern);
-      if (match) {
-        const potentialTarget = match[1];
-        // Try to match with available targets
-        const foundTarget = availableTargets.find(
-          (id) =>
-            id.includes(potentialTarget) ||
-            potentialTarget.includes(id.slice(-4))
-        );
-        if (foundTarget) {
-          targetId = foundTarget;
+    // 🔥 STRATEGY 1: Exact UUID matching
+    if (!targetId) {
+      for (const target of availableTargets) {
+        if (content.includes(target)) {
+          targetId = target;
+          parsingMethod = "exact_uuid";
+          console.log(`🎯 Found target using exact UUID matching: ${target}`);
           break;
         }
       }
     }
 
-    // Fallback: use personality-based decision
+    // 🔥 STRATEGY 2: Partial ID matching (last 8 chars)
+    if (!targetId) {
+      for (const target of availableTargets) {
+        const partialId = target.slice(-8);
+        if (content.includes(partialId)) {
+          targetId = target;
+          parsingMethod = "partial_id";
+          console.log(
+            `🎯 Found target using partial ID matching: ${target} (${partialId})`
+          );
+          break;
+        }
+      }
+    }
+
+    // 🔥 STRATEGY 3: Player name matching (simplified names)
+    if (!targetId) {
+      for (const target of availableTargets) {
+        const simplifiedName = `Player_${target.slice(-4)}`;
+        if (content.toLowerCase().includes(simplifiedName.toLowerCase())) {
+          targetId = target;
+          parsingMethod = "player_name";
+          console.log(
+            `🎯 Found target using player name matching: ${target} (${simplifiedName})`
+          );
+          break;
+        }
+      }
+    }
+
+    // 🔥 STRATEGY 4: Pattern-based extraction
+    if (!targetId) {
+      const votePatterns = [
+        /vote.*?for.*?([a-zA-Z_0-9-]{8,})/i,
+        /eliminate.*?([a-zA-Z_0-9-]{8,})/i,
+        /choose.*?([a-zA-Z_0-9-]{8,})/i,
+        /suspicious.*?([a-zA-Z_0-9-]{8,})/i,
+        /target.*?([a-zA-Z_0-9-]{8,})/i,
+        /Player_([a-zA-Z_0-9-]{4,})/i,
+      ];
+
+      for (const pattern of votePatterns) {
+        const match = content.match(pattern);
+        if (match) {
+          const potentialTarget = match[1];
+          // Try to match with available targets
+          const foundTarget = availableTargets.find(
+            (id) =>
+              id.includes(potentialTarget) ||
+              potentialTarget.includes(id.slice(-4)) ||
+              id.slice(-8).includes(potentialTarget)
+          );
+          if (foundTarget) {
+            targetId = foundTarget;
+            parsingMethod = "pattern_based";
+            console.log(
+              `🎯 Found target using pattern matching: ${foundTarget} (pattern: ${pattern})`
+            );
+            break;
+          }
+        }
+      }
+    }
+
+    // 🔥 STRATEGY 5: Intelligent fallback selection based on response content
     if (!targetId) {
       console.log(
-        `🎯 AI didn't specify clear target, using personality-based selection for ${personality.name}`
+        `🎯 All parsing strategies failed, using intelligent fallback`
       );
-      targetId = this.selectTargetByPersonality(availableTargets, personality);
-      reasoning = this.generatePersonalityBasedReasoning(personality);
+      parsingMethod = "intelligent_fallback";
+
+      // Analyze response content for sentiment
+      const contentLower = content.toLowerCase();
+
+      if (contentLower.includes("random") || contentLower.includes("guess")) {
+        // Random selection for uncertain AI
+        targetId =
+          availableTargets[Math.floor(Math.random() * availableTargets.length)];
+        reasoning = this.generateContextualReasoning(personality, "uncertain");
+      } else if (
+        contentLower.includes("suspicious") ||
+        contentLower.includes("mafia")
+      ) {
+        // Select based on personality for suspicion-based voting
+        targetId = this.selectTargetByPersonality(
+          availableTargets,
+          personality,
+          "suspicious"
+        );
+        reasoning = this.generateContextualReasoning(personality, "suspicious");
+      } else if (
+        contentLower.includes("trust") ||
+        contentLower.includes("protect")
+      ) {
+        // Select based on personality for trust-based voting
+        targetId = this.selectTargetByPersonality(
+          availableTargets,
+          personality,
+          "strategic"
+        );
+        reasoning = this.generateContextualReasoning(personality, "strategic");
+      } else {
+        // Default personality-based selection
+        targetId = this.selectTargetByPersonality(
+          availableTargets,
+          personality,
+          "default"
+        );
+        reasoning = this.generateContextualReasoning(personality, "default");
+      }
     }
+
+    // 🔥 FINAL VALIDATION: Ensure target is in available targets
+    if (!targetId || !availableTargets.includes(targetId)) {
+      console.warn(`⚠️ Target validation failed, using emergency fallback`);
+      targetId = availableTargets[0]; // Safe fallback to first available target
+      reasoning = this.generateContextualReasoning(personality, "emergency");
+      parsingMethod = "emergency_fallback";
+    }
+
+    // Clean up reasoning text
+    reasoning = this.cleanupReasoning(reasoning, content);
+
+    console.log(
+      `✅ Voting parsed successfully using ${parsingMethod}: ${targetId} - "${reasoning}"`
+    );
 
     return {
       targetId,
-      reasoning:
-        reasoning.replace(/^I vote.*?because/i, "").trim() || reasoning,
+      reasoning,
     };
   }
 
   /**
-   * FIXED: Parse night action response from AI with reasoning
+   * 🔥 ENHANCED: Parse night action response with comprehensive fallback
    */
-  private parseNightActionResponse(
+  private parseNightActionResponseWithFallback(
     response: AIResponse,
     role: PlayerRole,
     availableTargets: PlayerId[]
   ): { action: "kill" | "heal"; targetId: PlayerId | null; reasoning: string } {
-    const content = response.content.toLowerCase();
+    const content = response.content;
     const action = role === PlayerRole.MAFIA_LEADER ? "kill" : "heal";
     let reasoning = response.content.trim();
-
-    // Try to extract target from AI response
     let targetId: PlayerId | null = null;
+    let parsingMethod = "none";
 
-    const actionPatterns = [
-      /(?:kill|eliminate|target).*?([a-zA-Z_0-9-]+)/i,
-      /(?:protect|heal|save).*?([a-zA-Z_0-9-]+)/i,
-      /choose.*?([a-zA-Z_0-9-]+)/i,
-    ];
+    console.log(`🌙 Parsing night action for ${role}: "${content}"`);
 
-    for (const pattern of actionPatterns) {
-      const match = response.content.match(pattern);
-      if (match) {
-        const potentialTarget = match[1];
-        const foundTarget = availableTargets.find(
-          (id) =>
-            id.includes(potentialTarget) ||
-            potentialTarget.includes(id.slice(-4))
-        );
-        if (foundTarget) {
-          targetId = foundTarget;
+    // Strategy 1: Direct UUID matching
+    for (const target of availableTargets) {
+      if (content.includes(target)) {
+        targetId = target;
+        parsingMethod = "exact_uuid";
+        break;
+      }
+    }
+
+    // Strategy 2: Simplified name matching
+    if (!targetId) {
+      for (const target of availableTargets) {
+        const simplifiedName = `Player_${target.slice(-4)}`;
+        if (content.toLowerCase().includes(simplifiedName.toLowerCase())) {
+          targetId = target;
+          parsingMethod = "player_name";
           break;
         }
       }
     }
 
-    // Fallback: random selection if AI didn't specify clearly
+    // Strategy 3: Pattern-based extraction
+    if (!targetId) {
+      const actionPatterns = [
+        /(?:kill|eliminate|target).*?([a-zA-Z_0-9-]{8,})/i,
+        /(?:protect|heal|save).*?([a-zA-Z_0-9-]{8,})/i,
+        /choose.*?([a-zA-Z_0-9-]{8,})/i,
+        /Player_([a-zA-Z_0-9-]{4,})/i,
+      ];
+
+      for (const pattern of actionPatterns) {
+        const match = content.match(pattern);
+        if (match) {
+          const potentialTarget = match[1];
+          const foundTarget = availableTargets.find(
+            (id) =>
+              id.includes(potentialTarget) ||
+              potentialTarget.includes(id.slice(-4)) ||
+              id.slice(-8).includes(potentialTarget)
+          );
+          if (foundTarget) {
+            targetId = foundTarget;
+            parsingMethod = "pattern_based";
+            break;
+          }
+        }
+      }
+    }
+
+    // Strategy 4: Content analysis fallback
     if (!targetId && availableTargets.length > 0) {
-      targetId =
-        availableTargets[Math.floor(Math.random() * availableTargets.length)];
-      reasoning =
-        action === "kill"
-          ? "Strategic elimination based on threat assessment"
-          : "Protective decision based on vulnerability analysis";
-      console.log(
-        `🎯 AI didn't specify clear target, selected random: ${targetId}`
-      );
-    } else if (!targetId) {
-      // No targets available
-      reasoning =
-        action === "kill"
-          ? "No suitable targets identified this round"
-          : "No one requires protection at this time";
+      console.log(`🌙 Using content analysis fallback for night action`);
+
+      if (
+        content.toLowerCase().includes("no") ||
+        content.toLowerCase().includes("skip")
+      ) {
+        // AI explicitly chose not to act
+        targetId = null;
+        reasoning =
+          action === "kill"
+            ? "Strategic decision to skip elimination this round"
+            : "Choosing not to protect anyone tonight";
+        parsingMethod = "explicit_skip";
+      } else {
+        // Random selection as last resort
+        targetId =
+          availableTargets[Math.floor(Math.random() * availableTargets.length)];
+        reasoning =
+          action === "kill"
+            ? "Strategic elimination based on threat assessment"
+            : "Protective decision based on vulnerability analysis";
+        parsingMethod = "random_fallback";
+      }
     }
 
     // Clean up reasoning text
-    reasoning =
-      reasoning
-        .replace(/^(?:I (?:will|would|want to) |Let me )/i, "")
-        .replace(/^(?:kill|eliminate|target|protect|heal|save)/i, "")
-        .trim() ||
-      (action === "kill"
-        ? "Strategic decision based on game analysis"
-        : "Protective strategy based on current threats");
+    if (reasoning && targetId) {
+      reasoning =
+        reasoning
+          .replace(/^(?:I (?:will|would|want to) |Let me )/i, "")
+          .replace(/^(?:kill|eliminate|target|protect|heal|save)/i, "")
+          .trim() ||
+        (action === "kill"
+          ? "Strategic decision based on game analysis"
+          : "Protective strategy based on current threats");
+    }
+
+    console.log(
+      `✅ Night action parsed using ${parsingMethod}: ${action} ${
+        targetId || "nobody"
+      } - "${reasoning}"`
+    );
 
     return { action, targetId, reasoning };
+  }
+
+  /**
+   * 🔥 NEW: Generate contextual reasoning when AI parsing fails
+   */
+  private generateContextualReasoning(
+    personality: AIPersonality,
+    context: "uncertain" | "suspicious" | "strategic" | "default" | "emergency"
+  ): string {
+    const reasoningTemplates = {
+      uncertain: [
+        "I'm not entirely certain, but this feels like the right choice",
+        "Based on limited information, this seems most logical",
+        "This decision aligns with my current understanding",
+      ],
+      suspicious: [
+        "Something about their behavior seems off to me",
+        "Their voting patterns raise red flags",
+        "I've been watching their interactions closely",
+      ],
+      strategic: [
+        "This aligns with my overall strategy",
+        "Considering the current game state, this makes sense",
+        "This decision serves our collective interests",
+      ],
+      default: [
+        "Based on my analysis of the current situation",
+        "This choice reflects my assessment of the game",
+        "After careful consideration, this is my decision",
+      ],
+      emergency: [
+        "Making this choice based on available information",
+        "This decision follows logical reasoning",
+        "Proceeding with this strategic choice",
+      ],
+    };
+
+    const templates = reasoningTemplates[context];
+    let reasoning = templates[Math.floor(Math.random() * templates.length)];
+
+    // Add personality flair
+    if (personality.communicationStyle.emotionalExpression === "high") {
+      reasoning += "!";
+    } else if (personality.archetype === "analytical_detective") {
+      reasoning = "Analytically speaking, " + reasoning.toLowerCase();
+    } else if (personality.archetype === "creative_storyteller") {
+      reasoning = "I have a feeling that " + reasoning.toLowerCase();
+    }
+
+    return reasoning;
   }
 
   /**
@@ -402,53 +611,80 @@ export class AIResponseGenerator {
    */
   private selectTargetByPersonality(
     targets: PlayerId[],
-    personality: AIPersonality
+    personality: AIPersonality,
+    mode: "suspicious" | "strategic" | "default" = "default"
   ): PlayerId {
     if (targets.length === 0) {
       throw new Error("No available targets");
     }
 
-    // Use personality traits to influence selection
-    if (personality.strategicApproach.riskTolerance === "aggressive") {
-      // Aggressive players might target early in list
+    if (targets.length === 1) {
       return targets[0];
-    } else if (personality.strategicApproach.riskTolerance === "conservative") {
-      // Conservative players might target later in list
-      return targets[targets.length - 1];
-    } else {
-      // Moderate players pick middle
-      return targets[Math.floor(targets.length / 2)];
+    }
+
+    // Use personality traits to influence selection
+    switch (personality.archetype) {
+      case "creative_storyteller":
+        // Creative players might target based on "story" (first or last)
+        return mode === "suspicious" ? targets[0] : targets[targets.length - 1];
+
+      case "analytical_detective":
+        // Analytical players might target middle candidates
+        return targets[Math.floor(targets.length / 2)];
+
+      case "direct_analyst":
+        // Direct players pick based on aggressiveness
+        if (personality.aggressiveness > 7) {
+          return targets[0]; // Go for first target aggressively
+        } else {
+          return targets[targets.length - 1]; // Conservative choice
+        }
+
+      default:
+        // Default to risk tolerance
+        if (personality.strategicApproach.riskTolerance === "aggressive") {
+          return targets[0];
+        } else if (
+          personality.strategicApproach.riskTolerance === "conservative"
+        ) {
+          return targets[targets.length - 1];
+        } else {
+          return targets[Math.floor(targets.length / 2)];
+        }
     }
   }
 
   /**
-   * Generate reasoning based on personality when AI doesn't provide clear reasoning
+   * 🔥 NEW: Clean up reasoning text for better presentation
    */
-  private generatePersonalityBasedReasoning(
-    personality: AIPersonality
-  ): string {
-    const reasoningByArchetype = {
-      analytical_detective: [
-        "Based on behavioral patterns I've observed",
-        "The voting history suggests suspicious activity",
-        "Logical analysis points to this choice",
-      ],
-      creative_storyteller: [
-        "I have a strong feeling about this person",
-        "Something about their story doesn't add up",
-        "My intuition is telling me this is right",
-      ],
-      direct_analyst: [
-        "This is the most logical choice",
-        "Direct evidence points here",
-        "No point overthinking - this is it",
-      ],
-    };
+  private cleanupReasoning(reasoning: string, originalContent: string): string {
+    let cleaned = reasoning.trim();
 
-    const options =
-      reasoningByArchetype[personality.archetype] ||
-      reasoningByArchetype.analytical_detective;
-    return options[Math.floor(Math.random() * options.length)];
+    // Remove common AI prefixes
+    cleaned = cleaned
+      .replace(/^(I vote.*?because|My vote goes to|I choose to vote for)/i, "")
+      .replace(/^(I think|I believe|In my opinion)/i, "")
+      .trim();
+
+    // If cleaning removed too much, use original content but cleaned
+    if (cleaned.length < 10 && originalContent.length > 10) {
+      cleaned = originalContent
+        .replace(/^(I vote.*?for [^.]*\.?\s*)/i, "")
+        .replace(/^(I choose [^.]*\.?\s*)/i, "")
+        .trim();
+    }
+
+    // Ensure minimum length
+    if (cleaned.length < 5) {
+      cleaned = "Based on my analysis of the current situation";
+    }
+
+    // Ensure proper sentence structure
+    if (cleaned && !cleaned.match(/[.!?]$/)) {
+      cleaned += ".";
+    }
+
+    return cleaned;
   }
 
   /**

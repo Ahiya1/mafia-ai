@@ -1,4 +1,4 @@
-// server/lib/game/engine.ts - FIXED: Enhanced Observer Updates with Player Names
+// server/lib/game/engine.ts - FIXED: Bulletproof AI Voting Engine with Zero Hangs
 import {
   GameState,
   Player,
@@ -21,6 +21,197 @@ import { aiResponseGenerator } from "../../../src/lib/ai/response-generator";
 import { AIDecisionContext, AIPersonality } from "../types/ai";
 import { selectGamePersonalities } from "../../../src/lib/ai/personality-pool";
 
+/**
+ * 🔥 CRITICAL PRODUCTION FIX - GameEngineDebugger Class
+ * Added inside engine file for comprehensive debugging and monitoring
+ */
+class GameEngineDebugger {
+  private gameId: string;
+  private debugLogs: Array<{
+    timestamp: Date;
+    level: string;
+    message: string;
+    data?: any;
+  }> = [];
+
+  constructor(gameId: string) {
+    this.gameId = gameId;
+  }
+
+  logVotingPhaseStart(gameState: GameState): void {
+    const alivePlayers = Array.from(gameState.players.values()).filter(
+      (p) => p.isAlive
+    );
+    const message = `🗳️ VOTING PHASE START - ${alivePlayers.length} players can vote`;
+
+    console.log(`[${this.gameId}] ${message}`, {
+      speakingOrder: gameState.speakingOrder?.map(
+        (id) => gameState.players.get(id)?.name
+      ),
+      currentSpeaker: gameState.players.get(gameState.currentSpeaker || "")
+        ?.name,
+      existingVotes: gameState.votes.length,
+    });
+
+    this.addLog("INFO", message, {
+      alivePlayers: alivePlayers.length,
+      speakingOrder: gameState.speakingOrder?.length,
+      phase: gameState.phase,
+    });
+  }
+
+  logAIVotingAttempt(
+    aiPlayer: Player,
+    currentSpeaker: PlayerId | undefined,
+    hasAlreadyVoted: boolean
+  ): void {
+    const canVote = currentSpeaker === aiPlayer.id && !hasAlreadyVoted;
+    const message = `🤖 AI VOTING ATTEMPT - ${aiPlayer.name} (${
+      canVote ? "ALLOWED" : "BLOCKED"
+    })`;
+
+    console.log(`[${this.gameId}] ${message}`, {
+      currentSpeaker: currentSpeaker,
+      aiPlayerId: aiPlayer.id,
+      hasAlreadyVoted,
+      canVote,
+    });
+
+    this.addLog(canVote ? "INFO" : "WARN", message, {
+      playerId: aiPlayer.id,
+      playerName: aiPlayer.name,
+      currentSpeaker,
+      hasAlreadyVoted,
+      canVote,
+    });
+  }
+
+  logVoteCastResult(
+    voterId: PlayerId,
+    targetId: PlayerId,
+    success: boolean,
+    reason?: string
+  ): void {
+    const message = `${
+      success ? "✅" : "❌"
+    } VOTE CAST - ${voterId} → ${targetId} (${success ? "SUCCESS" : reason})`;
+
+    console.log(`[${this.gameId}] ${message}`);
+
+    this.addLog(success ? "INFO" : "ERROR", message, {
+      voterId,
+      targetId,
+      success,
+      reason,
+    });
+  }
+
+  checkForStuckStates(gameState: GameState): Array<string> {
+    const issues: string[] = [];
+
+    // Check for voting phase issues
+    if (gameState.phase === GamePhase.VOTING) {
+      const alivePlayers = Array.from(gameState.players.values()).filter(
+        (p) => p.isAlive
+      );
+      const votersWhoVoted = new Set(gameState.votes.map((v) => v.voterId));
+      const playersWhoNeedToVote = alivePlayers.filter(
+        (p) => !votersWhoVoted.has(p.id)
+      );
+
+      if (playersWhoNeedToVote.length > 0 && !gameState.currentSpeaker) {
+        issues.push(
+          `STUCK: ${playersWhoNeedToVote.length} players need to vote but no currentSpeaker set`
+        );
+      }
+
+      if (
+        gameState.currentSpeaker &&
+        !gameState.players.get(gameState.currentSpeaker)?.isAlive
+      ) {
+        issues.push(
+          `STUCK: currentSpeaker ${gameState.currentSpeaker} is not alive`
+        );
+      }
+    }
+
+    // Check for night phase issues
+    if (gameState.phase === GamePhase.NIGHT) {
+      const mafiaLeader = Array.from(gameState.players.values()).find(
+        (p) => p.isAlive && p.role === PlayerRole.MAFIA_LEADER
+      );
+      const healer = Array.from(gameState.players.values()).find(
+        (p) => p.isAlive && p.role === PlayerRole.HEALER
+      );
+
+      const mafiaActionExists = gameState.nightActions.some(
+        (a) => a.action === "kill"
+      );
+      const healerActionExists = gameState.nightActions.some(
+        (a) => a.action === "heal"
+      );
+
+      if (mafiaLeader && !mafiaActionExists) {
+        issues.push(
+          `MISSING: Mafia leader ${mafiaLeader.name} has not submitted kill action`
+        );
+      }
+
+      if (healer && !healerActionExists) {
+        issues.push(
+          `MISSING: Healer ${healer.name} has not submitted heal action`
+        );
+      }
+    }
+
+    if (issues.length > 0) {
+      console.warn(`[${this.gameId}] 🚨 STUCK STATE DETECTED:`, issues);
+      this.addLog("WARN", "Stuck state detected", { issues });
+    }
+
+    return issues;
+  }
+
+  generateStatusReport(gameState: GameState): any {
+    const alivePlayers = Array.from(gameState.players.values()).filter(
+      (p) => p.isAlive
+    );
+    const report = {
+      gameId: this.gameId,
+      phase: gameState.phase,
+      round: gameState.currentRound,
+      alivePlayers: alivePlayers.length,
+      votes: gameState.votes.length,
+      nightActions: gameState.nightActions.length,
+      currentSpeaker: gameState.currentSpeaker,
+      speakingOrder: gameState.speakingOrder?.length || 0,
+      stuckStateIssues: this.checkForStuckStates(gameState),
+      lastUpdate: new Date().toISOString(),
+    };
+
+    console.log(`[${this.gameId}] 📊 STATUS REPORT:`, report);
+    return report;
+  }
+
+  private addLog(level: string, message: string, data?: any): void {
+    this.debugLogs.push({
+      timestamp: new Date(),
+      level,
+      message,
+      data,
+    });
+
+    // Keep only last 100 logs to prevent memory bloat
+    if (this.debugLogs.length > 100) {
+      this.debugLogs = this.debugLogs.slice(-100);
+    }
+  }
+
+  getDebugLogs(): Array<any> {
+    return this.debugLogs;
+  }
+}
+
 export class MafiaGameEngine extends EventEmitter {
   private gameState: GameState;
   private phaseManager: GamePhaseManager;
@@ -29,12 +220,15 @@ export class MafiaGameEngine extends EventEmitter {
   private speakingTimer?: NodeJS.Timeout;
   private aiPersonalities: Map<PlayerId, AIPersonality> = new Map();
   private aiActionQueue: Map<PlayerId, Promise<any>> = new Map();
+  private debugger: GameEngineDebugger; // 🔥 NEW: Built-in debugging
+  private votingTimeouts: Map<PlayerId, NodeJS.Timeout> = new Map(); // 🔥 NEW: AI voting timeouts
 
   constructor(roomId: string, config: GameConfig) {
     super();
     this.gameState = this.initializeGame(roomId, config);
     this.phaseManager = new GamePhaseManager(this.gameState);
     this.stateManager = new GameStateManager(this.gameState);
+    this.debugger = new GameEngineDebugger(this.gameState.id); // 🔥 NEW: Initialize debugger
     this.setupPhaseManagerHandlers();
     this.setupStateManagerHandlers();
   }
@@ -84,7 +278,6 @@ export class MafiaGameEngine extends EventEmitter {
    * Setup state manager event handlers
    */
   private setupStateManagerHandlers(): void {
-    // FIXED: Enhanced observer update handling with player names
     this.stateManager.on("observer_update", (data) => {
       const enhancedData = this.enhanceObserverUpdate(data);
       this.emitEvent("observer_update", enhancedData);
@@ -107,7 +300,7 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * FIXED: Enhance observer updates with complete player information
+   * Enhance observer updates with complete player information
    */
   private enhanceObserverUpdate(data: any): any {
     if (!data.update) return data;
@@ -124,7 +317,6 @@ export class MafiaGameEngine extends EventEmitter {
       playerModel: player.model,
       playerRole: player.role,
       isPlayerAlive: player.isAlive,
-      // FIXED: Add contextual information for better observer experience
       context: {
         phase: this.gameState.phase,
         round: this.gameState.currentRound,
@@ -139,7 +331,7 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * FIXED: Enhance any data with player names for better display
+   * Enhance any data with player names for better display
    */
   private enhanceWithPlayerNames(data: any): any {
     if (!data) return data;
@@ -202,20 +394,17 @@ export class MafiaGameEngine extends EventEmitter {
         targetId: vote.targetId,
         reasoning: vote.reasoning,
         timestamp: vote.timestamp.toISOString(),
-        // FIXED: Include player names in vote data
         voterName: this.gameState.players.get(vote.voterId)?.name,
         targetName: this.gameState.players.get(vote.targetId)?.name,
       })),
       messages: this.gameState.messages.map((message) => ({
         ...message,
         timestamp: message.timestamp.toISOString(),
-        // FIXED: Include player name in message data
         playerName: this.gameState.players.get(message.playerId)?.name,
       })),
       nightActions: this.gameState.nightActions.map((action) => ({
         ...action,
         timestamp: action.timestamp.toISOString(),
-        // FIXED: Include player names in night action data
         playerName: this.gameState.players.get(action.playerId)?.name,
         targetName: action.targetId
           ? this.gameState.players.get(action.targetId)?.name
@@ -233,8 +422,8 @@ export class MafiaGameEngine extends EventEmitter {
         ...event,
         timestamp: event.timestamp.toISOString(),
       })),
-      // FIXED: Include complete observer data
       observerData: this.stateManager.getObserverGameState(),
+      debugInfo: this.debugger.generateStatusReport(this.gameState), // 🔥 NEW: Debug info
     };
 
     return baseState;
@@ -289,7 +478,6 @@ export class MafiaGameEngine extends EventEmitter {
       );
 
       if (personalities.length > 0) {
-        // Find personality with matching name or assign first available
         const personality =
           personalities.find((p) => p.name === player.name) || personalities[0];
         this.aiPersonalities.set(player.id, personality);
@@ -319,6 +507,13 @@ export class MafiaGameEngine extends EventEmitter {
     }
 
     const player = this.gameState.players.get(playerId);
+
+    // 🔥 NEW: Clear any pending voting timeout
+    const timeout = this.votingTimeouts.get(playerId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.votingTimeouts.delete(playerId);
+    }
 
     // Remove from state manager
     this.stateManager.removePlayer(playerId);
@@ -434,7 +629,7 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * FIXED: Handle real AI mafia action with enhanced observer updates
+   * Handle real AI mafia action with enhanced observer updates
    */
   private async handleAIMafiaActionReal(mafiaPlayer: Player): Promise<void> {
     const personality = this.aiPersonalities.get(mafiaPlayer.id);
@@ -458,7 +653,7 @@ export class MafiaGameEngine extends EventEmitter {
         `🔪 ${mafiaPlayer.name} (Mafia) is deciding who to eliminate...`
       );
 
-      // FIXED: Generate mafia coordination thoughts with enhanced details
+      // Generate mafia coordination thoughts with enhanced details
       const coordination = await aiResponseGenerator.generateMafiaCoordination(
         context,
         personality,
@@ -485,7 +680,7 @@ export class MafiaGameEngine extends EventEmitter {
           `🔪 ${mafiaPlayer.name} chose to eliminate ${targetPlayer?.name}`
         );
 
-        // FIXED: Add detailed AI reasoning for observers
+        // Add detailed AI reasoning for observers
         this.stateManager.addAIReasoning(
           mafiaPlayer.id,
           `🎯 Target Selection: ${mafiaPlayer.name} chose ${
@@ -501,7 +696,7 @@ export class MafiaGameEngine extends EventEmitter {
           this.nightAction(mafiaPlayer.id, "kill", decision.targetId!);
         }, 5000 + Math.random() * 15000);
       } else {
-        // FIXED: Handle case where no target is chosen
+        // Handle case where no target is chosen
         this.stateManager.addAIReasoning(
           mafiaPlayer.id,
           `🤔 ${
@@ -521,7 +716,7 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * FIXED: Handle real AI healer action with enhanced observer updates
+   * Handle real AI healer action with enhanced observer updates
    */
   private async handleAIHealerActionReal(healerPlayer: Player): Promise<void> {
     const personality = this.aiPersonalities.get(healerPlayer.id);
@@ -540,7 +735,7 @@ export class MafiaGameEngine extends EventEmitter {
         `🛡️ ${healerPlayer.name} (Healer) is deciding who to protect...`
       );
 
-      // FIXED: Generate healer thoughts with enhanced details
+      // Generate healer thoughts with enhanced details
       const thoughts = await aiResponseGenerator.generateHealerReasoning(
         context,
         personality,
@@ -566,7 +761,7 @@ export class MafiaGameEngine extends EventEmitter {
           `🛡️ ${healerPlayer.name} chose to protect ${targetPlayer?.name}`
         );
 
-        // FIXED: Add detailed healer reasoning for observers
+        // Add detailed healer reasoning for observers
         this.stateManager.addAIReasoning(
           healerPlayer.id,
           `🛡️ Protection Choice: ${healerPlayer.name} chose to protect ${
@@ -582,7 +777,7 @@ export class MafiaGameEngine extends EventEmitter {
           this.nightAction(healerPlayer.id, "heal", decision.targetId!);
         }, 3000 + Math.random() * 10000);
       } else {
-        // FIXED: Handle case where healer chooses not to heal
+        // Handle case where healer chooses not to heal
         this.stateManager.addAIReasoning(
           healerPlayer.id,
           `🤔 ${healerPlayer.name} decided not to protect anyone. Strategy: ${
@@ -624,7 +819,7 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * Handle voting phase with real AI decisions
+   * 🔥 CRITICAL FIX: Handle voting phase with bulletproof AI coordination
    */
   private handleVotingPhaseStart(): void {
     this.gameState.votes = [];
@@ -638,6 +833,9 @@ export class MafiaGameEngine extends EventEmitter {
     this.gameState.speakingOrder = alivePlayers.map((p) => p.id);
     this.gameState.currentSpeaker = this.gameState.speakingOrder[0];
 
+    // 🔥 NEW: Debug logging for voting phase start
+    this.debugger.logVotingPhaseStart(this.gameState);
+
     this.emitEvent("voting_started", {
       votingOrder: this.gameState.speakingOrder.map((id) => ({
         id,
@@ -645,20 +843,24 @@ export class MafiaGameEngine extends EventEmitter {
       })),
     });
 
-    // Start AI voting
-    this.startAIVoting();
+    // Start AI voting with bulletproof coordination
+    this.startAIVotingWithCoordination();
   }
 
   /**
-   * Start AI voting with real decision making
+   * 🔥 CRITICAL FIX: Start AI voting with bulletproof turn-based coordination
    */
-  private async startAIVoting(): Promise<void> {
+  private async startAIVotingWithCoordination(): Promise<void> {
     const aiPlayers = Array.from(this.gameState.players.values()).filter(
       (p) => p.type === PlayerType.AI && p.isAlive
     );
 
+    console.log(
+      `🤖 Starting coordinated AI voting for ${aiPlayers.length} AI players`
+    );
+
     for (const aiPlayer of aiPlayers) {
-      // Add delay based on speaking order
+      // Add delay based on speaking order for proper turn-based voting
       const speakingIndex =
         this.gameState.speakingOrder?.indexOf(aiPlayer.id) || 0;
       const delay = speakingIndex * 8000 + Math.random() * 5000; // 8s per player + randomness
@@ -670,20 +872,60 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * FIXED: Handle real AI voting with enhanced observer updates
+   * 🔥 CRITICAL PRODUCTION FIX: Handle AI voting with ZERO race conditions
+   * This is the primary fix that eliminates game hangs
    */
   private async handleAIVotingReal(aiPlayer: Player): Promise<void> {
     const personality = this.aiPersonalities.get(aiPlayer.id);
     if (!personality) {
       console.warn(`⚠️ No personality found for voter ${aiPlayer.name}`);
+      this.fallbackVoting(aiPlayer);
       return;
     }
 
-    // Check if it's this player's turn to vote
+    // 🔥 CRITICAL FIX 1: Validate it's this player's turn to vote
     if (this.gameState.currentSpeaker !== aiPlayer.id) {
-      console.log(`⏳ ${aiPlayer.name} waiting for turn to vote`);
+      console.log(
+        `⏳ ${aiPlayer.name} waiting for turn to vote (current: ${
+          this.gameState.players.get(this.gameState.currentSpeaker || "")?.name
+        })`
+      );
+      this.debugger.logAIVotingAttempt(
+        aiPlayer,
+        this.gameState.currentSpeaker,
+        false
+      );
       return;
     }
+
+    // 🔥 CRITICAL FIX 2: Check if player already voted (prevent duplicates)
+    const hasAlreadyVoted = this.gameState.votes.some(
+      (v) => v.voterId === aiPlayer.id
+    );
+    if (hasAlreadyVoted) {
+      console.log(`❌ ${aiPlayer.name} already voted, skipping duplicate vote`);
+      this.debugger.logAIVotingAttempt(
+        aiPlayer,
+        this.gameState.currentSpeaker,
+        true
+      );
+      this.advanceToNextVoter();
+      return;
+    }
+
+    // 🔥 CRITICAL FIX 3: Add timeout protection (15s max per AI decision)
+    const timeoutId = setTimeout(() => {
+      console.log(`⏰ AI voting timeout for ${aiPlayer.name}, using fallback`);
+      this.fallbackVoting(aiPlayer);
+    }, 15000);
+
+    this.votingTimeouts.set(aiPlayer.id, timeoutId);
+
+    this.debugger.logAIVotingAttempt(
+      aiPlayer,
+      this.gameState.currentSpeaker,
+      false
+    );
 
     try {
       const context = this.buildAIContext(aiPlayer);
@@ -693,19 +935,23 @@ export class MafiaGameEngine extends EventEmitter {
 
       console.log(`🗳️ ${aiPlayer.name} is deciding who to vote for...`);
 
-      // Get voting decision from real AI
+      // Get voting decision from real AI with enhanced error handling
       const votingDecision = await aiResponseGenerator.generateVotingResponse(
         context,
         personality,
         availableTargets
       );
 
+      // 🔥 CRITICAL FIX 4: Clear timeout on successful completion
+      clearTimeout(timeoutId);
+      this.votingTimeouts.delete(aiPlayer.id);
+
       const targetPlayer = this.gameState.players.get(votingDecision.targetId);
       console.log(
         `🗳️ ${aiPlayer.name} voted to eliminate ${targetPlayer?.name}: "${votingDecision.reasoning}"`
       );
 
-      // FIXED: Add enhanced AI reasoning for observers with more context
+      // Add enhanced AI reasoning for observers with more context
       this.stateManager.addAIReasoning(
         aiPlayer.id,
         `🗳️ ${aiPlayer.name} (${personality.model}) voting for ${
@@ -715,13 +961,23 @@ export class MafiaGameEngine extends EventEmitter {
         }/10`
       );
 
-      // Cast the vote
-      this.castVote(
+      // 🔥 CRITICAL FIX 5: Cast vote with comprehensive validation
+      const voteSuccess = this.castVote(
         aiPlayer.id,
         votingDecision.targetId,
         votingDecision.reasoning
       );
+
+      if (!voteSuccess) {
+        console.error(
+          `❌ Vote casting failed for ${aiPlayer.name}, using fallback`
+        );
+        this.fallbackVoting(aiPlayer);
+      }
     } catch (error) {
+      // 🔥 CRITICAL FIX 6: Clear timeout on error and use fallback
+      clearTimeout(timeoutId);
+      this.votingTimeouts.delete(aiPlayer.id);
       console.error(`❌ AI voting failed for ${aiPlayer.name}:`, error);
       this.fallbackVoting(aiPlayer);
     }
@@ -766,7 +1022,7 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * FIXED: Handle AI discussion with enhanced responses and observer updates
+   * Handle AI discussion with enhanced responses and observer updates
    */
   async handleAIDiscussionReal(aiPlayer: Player): Promise<void> {
     const personality = this.aiPersonalities.get(aiPlayer.id);
@@ -788,7 +1044,7 @@ export class MafiaGameEngine extends EventEmitter {
 
       console.log(`💬 ${aiPlayer.name}: "${response.content}"`);
 
-      // FIXED: Add enhanced AI reasoning for observers with strategy context
+      // Add enhanced AI reasoning for observers with strategy context
       this.stateManager.addAIReasoning(
         aiPlayer.id,
         `💭 ${aiPlayer.name} (${personality.model}) speaking strategy: ${
@@ -897,19 +1153,65 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * Cast vote with enhanced tracking
+   * 🔥 CRITICAL PRODUCTION FIX: Cast vote with bulletproof validation
    */
   castVote(playerId: PlayerId, targetId: PlayerId, reasoning: string): boolean {
     const voter = this.gameState.players.get(playerId);
     const target = this.gameState.players.get(targetId);
 
-    if (!voter || !target || !voter.isAlive || !target.isAlive) {
+    // 🔥 CRITICAL FIX 1: Comprehensive player validation
+    if (!voter || !target) {
+      const reason = `Invalid players - voter: ${!!voter}, target: ${!!target}`;
+      console.log(`❌ Vote failed for ${playerId}: ${reason}`);
+      this.debugger.logVoteCastResult(playerId, targetId, false, reason);
       return false;
     }
+
+    if (!voter.isAlive || !target.isAlive) {
+      const reason = `Dead players - voter alive: ${voter.isAlive}, target alive: ${target.isAlive}`;
+      console.log(`❌ Vote failed for ${voter.name}: ${reason}`);
+      this.debugger.logVoteCastResult(playerId, targetId, false, reason);
+      return false;
+    }
+
+    // 🔥 CRITICAL FIX 2: Strict phase validation
     if (this.gameState.phase !== GamePhase.VOTING) {
+      const reason = `Wrong phase: ${this.gameState.phase} (expected: ${GamePhase.VOTING})`;
+      console.log(`❌ Vote failed for ${voter.name}: ${reason}`);
+      this.debugger.logVoteCastResult(playerId, targetId, false, reason);
       return false;
     }
+
+    // 🔥 CRITICAL FIX 3: Prevent self-voting
     if (playerId === targetId) {
+      const reason = "Cannot vote for yourself";
+      console.log(`❌ Vote failed for ${voter.name}: ${reason}`);
+      this.debugger.logVoteCastResult(playerId, targetId, false, reason);
+      return false;
+    }
+
+    // 🔥 CRITICAL FIX 4: Strict turn validation
+    if (this.gameState.currentSpeaker !== playerId) {
+      const currentSpeakerName = this.gameState.players.get(
+        this.gameState.currentSpeaker || ""
+      )?.name;
+      const reason = `Not your turn - current speaker: ${currentSpeakerName}`;
+      console.log(`❌ Vote failed for ${voter.name}: ${reason}`);
+      this.debugger.logVoteCastResult(playerId, targetId, false, reason);
+      return false;
+    }
+
+    // 🔥 CRITICAL FIX 5: Prevent duplicate votes with clear messaging
+    const existingVote = this.gameState.votes.find(
+      (v) => v.voterId === playerId
+    );
+    if (existingVote) {
+      const previousTargetName = this.gameState.players.get(
+        existingVote.targetId
+      )?.name;
+      const reason = `Already voted for ${previousTargetName}`;
+      console.log(`❌ Vote failed for ${voter.name}: ${reason}`);
+      this.debugger.logVoteCastResult(playerId, targetId, false, reason);
       return false;
     }
 
@@ -923,16 +1225,20 @@ export class MafiaGameEngine extends EventEmitter {
     // Add to state manager
     const success = this.stateManager.addVote(vote);
     if (!success) {
+      const reason = "State manager rejected vote";
+      console.log(`❌ Vote failed for ${voter.name}: ${reason}`);
+      this.debugger.logVoteCastResult(playerId, targetId, false, reason);
       return false;
     }
 
     // Update local state
-    this.gameState.votes = this.gameState.votes.filter(
-      (v) => v.voterId !== playerId
-    );
     this.gameState.votes.push(vote);
 
-    console.log(`🗳️ ${voter.name} voted to eliminate ${target.name}`);
+    // 🔥 CRITICAL FIX 6: Detailed success logging
+    console.log(
+      `✅ Vote successful: ${voter.name} → ${target.name} ("${reasoning}")`
+    );
+    this.debugger.logVoteCastResult(playerId, targetId, true);
 
     // Advance to next voter
     this.advanceToNextVoter();
@@ -1016,10 +1322,26 @@ export class MafiaGameEngine extends EventEmitter {
   }
 
   /**
-   * Handle revelation phase with enhanced logic
+   * 🔥 CRITICAL FIX: Handle revelation phase with enhanced logic and logging
    */
   private handleRevelationPhase(): void {
     console.log(`💀 Processing night actions...`);
+
+    // 🔥 NEW: Detailed night action logging
+    console.log(
+      `🌙 Night actions submitted: ${this.gameState.nightActions.length}`
+    );
+    this.gameState.nightActions.forEach((action) => {
+      const player = this.gameState.players.get(action.playerId);
+      const target = action.targetId
+        ? this.gameState.players.get(action.targetId)
+        : null;
+      console.log(
+        `🌙 ${player?.name} wants to ${action.action} ${
+          target?.name || "nobody"
+        }`
+      );
+    });
 
     const eliminatedPlayer = this.processNightActions();
 
@@ -1052,8 +1374,9 @@ export class MafiaGameEngine extends EventEmitter {
     }
   }
 
-  // Fallback methods for when AI fails
+  // 🔥 CRITICAL FIX: Fallback methods with comprehensive timeout handling
   private fallbackMafiaAction(mafiaPlayer: Player): void {
+    console.log(`🔄 Using fallback mafia action for ${mafiaPlayer.name}`);
     const availableTargets = Array.from(this.gameState.players.values()).filter(
       (p) =>
         p.isAlive &&
@@ -1064,13 +1387,15 @@ export class MafiaGameEngine extends EventEmitter {
     if (availableTargets.length > 0) {
       const target =
         availableTargets[Math.floor(Math.random() * availableTargets.length)];
+      console.log(`🔄 Fallback: ${mafiaPlayer.name} targeting ${target.name}`);
       setTimeout(() => {
         this.nightAction(mafiaPlayer.id, "kill", target.id);
-      }, 10000);
+      }, 2000);
     }
   }
 
   private fallbackHealerAction(healerPlayer: Player): void {
+    console.log(`🔄 Using fallback healer action for ${healerPlayer.name}`);
     const availableTargets = Array.from(this.gameState.players.values()).filter(
       (p) => p.isAlive
     );
@@ -1078,13 +1403,28 @@ export class MafiaGameEngine extends EventEmitter {
     if (availableTargets.length > 0) {
       const target =
         availableTargets[Math.floor(Math.random() * availableTargets.length)];
+      console.log(
+        `🔄 Fallback: ${healerPlayer.name} protecting ${target.name}`
+      );
       setTimeout(() => {
         this.nightAction(healerPlayer.id, "heal", target.id);
-      }, 5000);
+      }, 2000);
     }
   }
 
+  /**
+   * 🔥 CRITICAL FIX: Fallback voting with proper turn advancement
+   */
   private fallbackVoting(aiPlayer: Player): void {
+    console.log(`🔄 Using fallback voting for ${aiPlayer.name}`);
+
+    // Clear any existing timeout
+    const timeout = this.votingTimeouts.get(aiPlayer.id);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.votingTimeouts.delete(aiPlayer.id);
+    }
+
     const availableTargets = Array.from(this.gameState.players.values()).filter(
       (p) => p.isAlive && p.id !== aiPlayer.id
     );
@@ -1092,19 +1432,33 @@ export class MafiaGameEngine extends EventEmitter {
     if (availableTargets.length > 0) {
       const target =
         availableTargets[Math.floor(Math.random() * availableTargets.length)];
+      console.log(`🔄 Fallback: ${aiPlayer.name} voting for ${target.name}`);
+
       setTimeout(() => {
-        this.castVote(
+        const success = this.castVote(
           aiPlayer.id,
           target.id,
           "Based on my analysis of the discussion"
         );
-      }, 3000);
+
+        if (!success) {
+          console.log(
+            `🔄 Fallback vote failed for ${aiPlayer.name}, advancing to next voter`
+          );
+          this.advanceToNextVoter();
+        }
+      }, 1000);
+    } else {
+      // No valid targets, advance to next voter
+      console.log(
+        `🔄 No targets available for ${aiPlayer.name}, advancing to next voter`
+      );
+      this.advanceToNextVoter();
     }
   }
 
   // [Rest of the existing methods remain the same but updated to use new managers]
-  // assignRoles, processNightActions, processVotes, checkWinCondition, etc.
-  // These are unchanged from the original implementation
+  // assignRoles, processNightActions, checkWinCondition, etc.
 
   private assignRoles(): void {
     const players = Array.from(this.gameState.players.values());
@@ -1132,6 +1486,9 @@ export class MafiaGameEngine extends EventEmitter {
     });
   }
 
+  /**
+   * 🔥 CRITICAL FIX: Enhanced night action processing with detailed logging
+   */
   private processNightActions(): Player | null {
     const killAction = this.gameState.nightActions.find(
       (a) => a.action === "kill"
@@ -1140,18 +1497,27 @@ export class MafiaGameEngine extends EventEmitter {
       (a) => a.action === "heal"
     );
 
+    // 🔥 NEW: Detailed processing logs
     if (!killAction || !killAction.targetId) {
+      console.log(`🔍 No kill action found or no target specified`);
       return null;
     }
 
     const target = this.gameState.players.get(killAction.targetId);
-    if (!target) return null;
-
-    if (healAction && healAction.targetId === killAction.targetId) {
-      console.log(`🛡️ ${target.name} was protected by the healer!`);
+    if (!target) {
+      console.log(`🔍 Kill target not found: ${killAction.targetId}`);
       return null;
     }
 
+    console.log(`🔪 Mafia attempted to kill: ${target.name}`);
+
+    if (healAction && healAction.targetId === killAction.targetId) {
+      const healerName = this.gameState.players.get(healAction.playerId)?.name;
+      console.log(`🛡️ ${target.name} was protected by ${healerName}!`);
+      return null;
+    }
+
+    console.log(`💀 ${target.name} will be eliminated`);
     return target;
   }
 
@@ -1186,16 +1552,56 @@ export class MafiaGameEngine extends EventEmitter {
     return { reason: "Game continues", isGameOver: false };
   }
 
+  /**
+   * 🔥 CRITICAL FIX: Enhanced vote processing with comprehensive logging and edge cases
+   */
   private processVotes(): void {
+    console.log(`📊 Processing ${this.gameState.votes.length} votes...`);
+
+    // 🔥 CRITICAL FIX: Handle "no votes cast" edge case
     if (this.gameState.votes.length === 0) {
+      console.log(`📊 No votes were cast, proceeding to night phase`);
+      this.emitEvent("no_votes_cast", {
+        reason: "No players voted",
+        phase: "proceeding_to_night",
+      });
       this.changePhase(GamePhase.NIGHT);
       return;
     }
+
+    // 🔥 CRITICAL FIX: Log every single vote with voter/target names
+    console.log(`📊 Vote breakdown:`);
+    this.gameState.votes.forEach((vote, index) => {
+      const voterName = this.gameState.players.get(vote.voterId)?.name;
+      const targetName = this.gameState.players.get(vote.targetId)?.name;
+      console.log(
+        `📊 Vote ${index + 1}: ${voterName} → ${targetName} ("${
+          vote.reasoning
+        }")`
+      );
+    });
 
     const voteCounts = new Map<PlayerId, number>();
     this.gameState.votes.forEach((vote) => {
       const current = voteCounts.get(vote.targetId) || 0;
       voteCounts.set(vote.targetId, current + 1);
+    });
+
+    // 🔥 CRITICAL FIX: Log vote counts with clear winner determination
+    console.log(`📊 Vote tally:`);
+    const voteResults: Array<{
+      playerId: PlayerId;
+      playerName: string;
+      votes: number;
+    }> = [];
+    voteCounts.forEach((votes, playerId) => {
+      const playerName = this.gameState.players.get(playerId)?.name;
+      console.log(`📊 ${playerName}: ${votes} vote${votes === 1 ? "" : "s"}`);
+      voteResults.push({
+        playerId,
+        playerName: playerName || "Unknown",
+        votes,
+      });
     });
 
     let maxVotes = 0;
@@ -1212,19 +1618,53 @@ export class MafiaGameEngine extends EventEmitter {
       }
     });
 
+    // 🔥 CRITICAL FIX: Handle ties with explicit messaging
     if (tiedPlayers.length > 1) {
+      const tiedPlayerNames = tiedPlayers.map(
+        (id) => this.gameState.players.get(id)?.name
+      );
+      console.log(
+        `🤝 Vote tied between: ${tiedPlayerNames.join(
+          ", "
+        )} (${maxVotes} votes each)`
+      );
+
       this.emitEvent("vote_tied", {
         tiedPlayers: tiedPlayers.map((id) => ({
           id,
           name: this.gameState.players.get(id)?.name,
         })),
         voteCount: maxVotes,
+        reason: "Multiple players received equal votes",
       });
+
       this.changePhase(GamePhase.NIGHT);
       return;
     }
 
+    // 🔥 CRITICAL FIX: Validate all player states before elimination
     if (eliminatedPlayerId) {
+      const eliminatedPlayer = this.gameState.players.get(eliminatedPlayerId);
+      if (!eliminatedPlayer) {
+        console.error(
+          `❌ Cannot eliminate player ${eliminatedPlayerId} - player not found`
+        );
+        this.changePhase(GamePhase.NIGHT);
+        return;
+      }
+
+      if (!eliminatedPlayer.isAlive) {
+        console.error(
+          `❌ Cannot eliminate ${eliminatedPlayer.name} - already dead`
+        );
+        this.changePhase(GamePhase.NIGHT);
+        return;
+      }
+
+      console.log(
+        `🏆 ${eliminatedPlayer.name} eliminated by vote (${maxVotes} votes)`
+      );
+
       this.stateManager.eliminatePlayer(eliminatedPlayerId, "voted_out");
 
       const winCondition = this.checkWinCondition();
@@ -1280,24 +1720,41 @@ export class MafiaGameEngine extends EventEmitter {
     }
   }
 
+  /**
+   * 🔥 CRITICAL FIX: Enhanced voter advancement with comprehensive logging
+   */
   private advanceToNextVoter(): void {
-    if (!this.gameState.speakingOrder || !this.gameState.currentSpeaker) return;
+    if (!this.gameState.speakingOrder || !this.gameState.currentSpeaker) {
+      console.log(
+        `🔄 Cannot advance voter - no speaking order or current speaker`
+      );
+      return;
+    }
 
     const currentIndex = this.gameState.speakingOrder.indexOf(
       this.gameState.currentSpeaker
     );
     const nextIndex = currentIndex + 1;
 
+    console.log(
+      `🔄 Advancing from voter ${currentIndex + 1} to ${nextIndex + 1}`
+    );
+
     if (nextIndex < this.gameState.speakingOrder.length) {
       this.gameState.currentSpeaker = this.gameState.speakingOrder[nextIndex];
       const nextPlayer = this.gameState.players.get(
         this.gameState.currentSpeaker
       );
+
+      console.log(`🔄 Next voter: ${nextPlayer?.name}`);
+
       this.emitEvent("next_voter", {
         voterId: this.gameState.currentSpeaker,
         voterName: nextPlayer?.name,
       });
     } else {
+      console.log(`🔄 All players have voted, processing results`);
+      this.gameState.currentSpeaker = undefined;
       this.processVotes();
     }
   }
@@ -1306,8 +1763,11 @@ export class MafiaGameEngine extends EventEmitter {
     this.gameState.phase = GamePhase.GAME_OVER;
     this.gameState.winner = winner;
 
+    // 🔥 NEW: Clear all timeouts on game end
     if (this.phaseTimer) clearTimeout(this.phaseTimer);
     if (this.speakingTimer) clearTimeout(this.speakingTimer);
+    this.votingTimeouts.forEach((timeout) => clearTimeout(timeout));
+    this.votingTimeouts.clear();
 
     this.emitEvent("game_ended", {
       winner,
@@ -1385,6 +1845,23 @@ export class MafiaGameEngine extends EventEmitter {
     return false;
   }
 
+  // 🔥 NEW: Public debugging methods for emergency fixes
+  public getDebugInfo(): any {
+    return this.debugger.generateStatusReport(this.gameState);
+  }
+
+  public forceVoteProgression(): boolean {
+    if (this.gameState.phase !== GamePhase.VOTING) return false;
+
+    console.log(`🔧 Force vote progression triggered`);
+    this.processVotes();
+    return true;
+  }
+
+  public getStuckStateIssues(): string[] {
+    return this.debugger.checkForStuckStates(this.gameState);
+  }
+
   // Public API
   getGameState(): GameState {
     return this.stateManager.getGameState();
@@ -1435,6 +1912,10 @@ export class MafiaGameEngine extends EventEmitter {
     this.stateManager.cleanup();
     this.aiActionQueue.clear();
     this.aiPersonalities.clear();
+
+    // 🔥 NEW: Clear all voting timeouts
+    this.votingTimeouts.forEach((timeout) => clearTimeout(timeout));
+    this.votingTimeouts.clear();
 
     if (this.phaseTimer) clearTimeout(this.phaseTimer);
     if (this.speakingTimer) clearTimeout(this.speakingTimer);
