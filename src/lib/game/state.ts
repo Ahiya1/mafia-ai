@@ -958,19 +958,32 @@ export class GameStateManager extends EventEmitter {
   /**
    * Get phase statistics
    */
+  /**
+   * Get phase statistics - FIXED: Proper object handling
+   */
   private getPhaseStatistics(): Record<string, any> {
     const phaseStats: Record<string, any> = {};
 
+    // Initialize all phases as objects first
     for (const [phase, count] of this.phaseActionCounts.entries()) {
-      phaseStats[phase] = count;
+      phaseStats[phase] = {
+        actionCount: count,
+        duration: 0,
+        actions: 0,
+      };
     }
 
     // Add phase duration statistics
     for (const phaseEntry of this.phaseHistory) {
       const phaseKey = phaseEntry.phase;
       if (!phaseStats[phaseKey]) {
-        phaseStats[phaseKey] = {};
+        phaseStats[phaseKey] = {
+          actionCount: 0,
+          duration: 0,
+          actions: 0,
+        };
       }
+      // Now these will work because phaseStats[phaseKey] is an object
       phaseStats[phaseKey].duration = phaseEntry.duration;
       phaseStats[phaseKey].actions = phaseEntry.actions;
     }
