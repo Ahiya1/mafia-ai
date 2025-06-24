@@ -30,6 +30,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
     "@google/generative-ai": "^0.21.0",
+    "@prisma/client": "^6.10.1",
     "@supabase/supabase-js": "^2.39.7",
     "@tailwindcss/vite": "^4.1.10",
     "bcryptjs": "^2.4.3",
@@ -42,6 +43,7 @@
     "jsonwebtoken": "^9.0.2",
     "next": "^15.3.0",
     "openai": "^5.6.0",
+    "pg": "^8.16.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^2.10.3",
@@ -65,6 +67,7 @@
     "concurrently": "^8.2.2",
     "eslint": "^9.0.0",
     "eslint-config-next": "^15.3.0",
+    "prisma": "^6.10.1",
     "typescript": "^5.6.0"
   }
 }

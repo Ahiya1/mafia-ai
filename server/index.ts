@@ -1,4 +1,4 @@
-// server/index.ts - Updated with Real AI Integration
+// server/index.ts - Complete AI Mafia Server with Real AI Integration & Fixed Auth
 import express, { Request, Response, NextFunction } from "express";
 import { createServer } from "http";
 import cors from "cors";
@@ -7,6 +7,7 @@ import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import winston from "winston";
 import { GameSocketServer } from "./socket/game-server";
+import { authManager } from "./lib/auth/auth-manager";
 
 dotenv.config();
 
@@ -47,19 +48,16 @@ interface ServerMetrics {
  * Safe wrapper for process.loadavg() that handles platform differences
  */
 function getLoadAverage(): number[] {
-  // Early return for Windows
   if (process.platform === "win32") {
     return [0, 0, 0];
   }
 
   try {
-    // Check if method exists without calling it first
     const hasLoadavg = "loadavg" in process;
     if (hasLoadavg) {
       const loadavgFn = (process as any).loadavg;
       if (typeof loadavgFn === "function") {
         const result = loadavgFn();
-        // Validate result
         if (Array.isArray(result) && result.length === 3) {
           return result.map((n) => (typeof n === "number" ? n : 0));
         }
@@ -102,7 +100,6 @@ function isValidAIStats(stats: unknown): stats is AIStatEntry {
  * Safe AI stats processing with proper type handling
  */
 function processAIStatsEntry(model: string, stats: unknown): [string, any] {
-  // Default safe stats object
   const defaultStats = {
     totalRequests: 0,
     totalCost: 0,
@@ -111,7 +108,6 @@ function processAIStatsEntry(model: string, stats: unknown): [string, any] {
     errorCount: 0,
   };
 
-  // Type guard check
   if (isValidAIStats(stats)) {
     return [
       model,
@@ -128,7 +124,6 @@ function processAIStatsEntry(model: string, stats: unknown): [string, any] {
     ];
   }
 
-  // Fallback processing
   if (typeof stats === "object" && stats !== null) {
     const obj = stats as Record<string, any>;
     const totalRequests =
@@ -149,7 +144,6 @@ function processAIStatsEntry(model: string, stats: unknown): [string, any] {
     ];
   }
 
-  // Ultimate fallback
   return [model, defaultStats];
 }
 
@@ -208,6 +202,7 @@ function getSafeServerMetrics(): ServerMetrics {
   }
 }
 
+// Initialize logger
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || "info",
   format: winston.format.combine(
@@ -234,6 +229,7 @@ const logger = winston.createLogger({
   ],
 });
 
+// Initialize Express app and server
 const app = express();
 const httpServer = createServer(app);
 const gameSocketServer = new GameSocketServer(httpServer);
@@ -243,6 +239,7 @@ const HOST = "0.0.0.0";
 
 logger.info(`🌍 Server will bind to ${HOST}:${PORT}`);
 
+// Security middleware
 app.use(
   helmet({
     contentSecurityPolicy:
@@ -262,6 +259,7 @@ app.use(
   })
 );
 
+// Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000", 10),
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "200", 10),
@@ -273,6 +271,7 @@ const limiter = rateLimit({
 
 app.use(limiter);
 
+// CORS configuration
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3001",
@@ -314,9 +313,11 @@ app.use(
   })
 );
 
+// Body parsing middleware
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+// Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   logger.info(`${req.method} ${req.path}`, {
     ip: req.ip,
@@ -327,6 +328,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+// Database connection check
 let database: any = null;
 try {
   if (
@@ -339,19 +341,16 @@ try {
       type: "supabase",
       url: process.env.NEXT_PUBLIC_SUPABASE_URL,
     };
-  } else if (process.env.DATABASE_URL) {
-    logger.info("✅ PostgreSQL database connection ready");
-    database = {
-      connected: true,
-      type: "postgresql",
-      url: process.env.DATABASE_URL,
-    };
   } else {
     logger.warn("⚠️  Database credentials not found - features disabled");
   }
 } catch (error) {
   logger.error("❌ Database initialization failed:", error);
 }
+
+// ================================
+// BASIC SERVER ENDPOINTS
+// ================================
 
 app.get("/", (_req: Request, res: Response) => {
   res.json({
@@ -366,12 +365,19 @@ app.get("/", (_req: Request, res: Response) => {
       observerMode: "Full spectator capabilities",
       smartPhases: "Early progression when actions complete",
       analytics: "Real-time game analytics",
+      authentication: "Supabase integration",
+      subscriptions: "Monthly tiers with premium features",
     },
     endpoints: {
       health: "/health",
       stats: "/api/stats",
       gameInfo: "/api/game-modes",
       personalities: "/api/personalities",
+      auth: {
+        signup: "/api/auth/signup",
+        signin: "/api/auth/signin",
+      },
+      packages: "/api/packages",
       creator: {
         activeGames: "/api/creator/active-games",
         exportData: "/api/creator/export-data",
@@ -429,12 +435,15 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json(healthData);
 });
 
+// ================================
+// STATISTICS & MONITORING
+// ================================
+
 app.get("/api/stats", async (_req: Request, res: Response) => {
   try {
     const roomStats = gameSocketServer.getRoomStats();
     const aiStats = gameSocketServer.getAIUsageStats();
 
-    // Process AI stats safely
     const aiStatsArray: Array<[string, any]> = [];
     for (const [model, stats] of aiStats.entries()) {
       aiStatsArray.push(processAIStatsEntry(model, stats));
@@ -472,8 +481,8 @@ app.get("/api/stats", async (_req: Request, res: Response) => {
             const [model, stats] = entry;
             if (stats.totalRequests > 0) {
               acc[model] = {
-                realism: Math.round(90 + Math.random() * 10), // Higher realism with real AI
-                detectionRate: Math.round(15 + Math.random() * 20), // Lower detection with real AI
+                realism: Math.round(90 + Math.random() * 10),
+                detectionRate: Math.round(15 + Math.random() * 20),
                 totalRequests: stats.totalRequests,
                 avgResponseTime: stats.averageResponseTime,
                 totalCost: stats.totalCost,
@@ -497,6 +506,10 @@ app.get("/api/stats", async (_req: Request, res: Response) => {
     });
   }
 });
+
+// ================================
+// GAME INFORMATION ENDPOINTS
+// ================================
 
 app.get("/api/game-modes", (_req: Request, res: Response) => {
   res.json({
@@ -555,7 +568,6 @@ app.get("/api/game-modes", (_req: Request, res: Response) => {
 
 app.get("/api/personalities", (_req: Request, res: Response) => {
   try {
-    // Use a safe fallback that returns basic personality info
     const personalityInfo = {
       total: 50,
       free: 18,
@@ -590,6 +602,375 @@ app.get("/api/personalities", (_req: Request, res: Response) => {
     });
   }
 });
+
+// ================================
+// ADMIN SETUP & USER MANAGEMENT
+// ================================
+
+app.post("/api/setup-admin", async (req: Request, res: Response) => {
+  try {
+    const { password, email } = req.body;
+
+    const creatorPassword = process.env.CREATOR_BYPASS_PASSWORD;
+    if (!creatorPassword || password !== creatorPassword) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid creator password",
+      });
+    }
+
+    const adminEmail = email || "ahiya.butman@gmail.com";
+    const adminPassword = "detective_ai_mafia_2025";
+
+    const result = await authManager.setupAdminUser(adminEmail, adminPassword);
+
+    logger.info("Admin setup attempt", {
+      success: result.success,
+      email: adminEmail,
+      userId: result.userId,
+    });
+
+    return res.json({
+      success: result.success,
+      message: result.message,
+      userId: result.userId,
+      credentials: result.success
+        ? {
+            email: adminEmail,
+            password: adminPassword,
+            permissions: [
+              "unlimited_games",
+              "premium_models",
+              "admin_tools",
+              "ai_only_games",
+              "analytics_export",
+              "user_management",
+              "database_access",
+            ],
+          }
+        : undefined,
+    });
+  } catch (error) {
+    logger.error("Admin setup error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to setup admin user",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+// ================================
+// AUTHENTICATION ENDPOINTS
+// ================================
+
+app.post("/api/auth/signup", async (req: Request, res: Response) => {
+  try {
+    const { email, password, username } = req.body;
+
+    if (!email || !password || !username) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        required: ["email", "password", "username"],
+      });
+    }
+
+    const result = await authManager.createUser(email, password, username);
+
+    if (result.error) {
+      return res.status(400).json({
+        success: false,
+        error: result.error.message || "Failed to create user",
+        code: result.error.code,
+      });
+    }
+
+    logger.info("User created successfully", {
+      userId: result.user?.id,
+      email,
+      username,
+    });
+
+    return res.status(201).json({
+      success: true,
+      user: {
+        id: result.user?.id,
+        email: result.user?.email,
+        username,
+      },
+      message: "Account created successfully with free package",
+      freeGames: 3,
+    });
+  } catch (error) {
+    logger.error("Signup error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+    });
+  }
+});
+
+app.post("/api/auth/signin", async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing email or password",
+      });
+    }
+
+    const result = await authManager.signInUser(email, password);
+
+    if (result.error) {
+      return res.status(401).json({
+        success: false,
+        error: result.error.message || "Invalid credentials",
+        code: result.error.code,
+      });
+    }
+
+    // Get user profile and packages
+    const userProfile = await authManager.getUserProfile(result.user!.id);
+    const userPackages = await authManager.getUserPackages(result.user!.id);
+    const gameAccess = await authManager.checkGameAccess(result.user!.id);
+
+    logger.info("User signed in", {
+      userId: result.user?.id,
+      email,
+      isAdmin: userProfile?.is_creator,
+    });
+
+    return res.json({
+      success: true,
+      user: userProfile,
+      session: {
+        access_token: result.session?.access_token,
+        expires_at: result.session?.expires_at,
+      },
+      packages: userPackages,
+      gameAccess,
+      message: "Signed in successfully",
+    });
+  } catch (error) {
+    logger.error("Signin error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+    });
+  }
+});
+
+// ================================
+// PACKAGE MANAGEMENT
+// ================================
+
+app.get("/api/packages", async (_req: Request, res: Response) => {
+  try {
+    const packages = await authManager.getAvailablePackages();
+
+    return res.json({
+      success: true,
+      packages: packages.map((pkg) => ({
+        ...pkg,
+        displayPrice: pkg.price_usd === 0 ? "Free" : `$${pkg.price_usd}`,
+        isPopular: pkg.name === "Social",
+        gameValue:
+          pkg.price_usd > 0
+            ? `$${(pkg.price_usd / pkg.games_included).toFixed(2)} per game`
+            : "Free",
+      })),
+    });
+  } catch (error) {
+    logger.error("Error fetching packages:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch packages",
+    });
+  }
+});
+
+app.get("/api/user/packages", async (req: Request, res: Response) => {
+  try {
+    const userId = req.headers.authorization?.replace("Bearer ", "");
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication required",
+      });
+    }
+
+    const userPackages = await authManager.getUserPackages(userId);
+    const gameAccess = await authManager.checkGameAccess(userId);
+
+    return res.json({
+      success: true,
+      packages: userPackages,
+      gameAccess,
+      summary: {
+        totalGamesRemaining: userPackages.reduce(
+          (sum, pkg) => sum + pkg.games_remaining,
+          0
+        ),
+        premiumAccess: gameAccess.premiumFeatures,
+        isAdmin: gameAccess.accessType === "admin",
+      },
+    });
+  } catch (error) {
+    logger.error("Error fetching user packages:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch user packages",
+    });
+  }
+});
+
+app.post("/api/purchase", async (req: Request, res: Response) => {
+  try {
+    const { userId, packageId, paypalTransactionId, amountPaid } = req.body;
+
+    if (!userId || !packageId || !paypalTransactionId || !amountPaid) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required purchase data",
+        required: ["userId", "packageId", "paypalTransactionId", "amountPaid"],
+      });
+    }
+
+    const result = await authManager.purchasePackage(
+      userId,
+      packageId,
+      paypalTransactionId,
+      amountPaid
+    );
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    const updatedPackages = await authManager.getUserPackages(userId);
+    const gameAccess = await authManager.checkGameAccess(userId);
+
+    logger.info("Package purchased", {
+      userId,
+      packageId,
+      amountPaid,
+      transactionId: paypalTransactionId,
+    });
+
+    return res.json({
+      success: true,
+      message: result.message,
+      packageInfo: result.packageInfo,
+      updatedPackages,
+      gameAccess,
+    });
+  } catch (error) {
+    logger.error("Purchase error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Purchase failed due to system error",
+    });
+  }
+});
+
+// ================================
+// GAME ACCESS CONTROL
+// ================================
+
+app.post("/api/game/check-access", async (req: Request, res: Response) => {
+  try {
+    const { userId, requiresPremium = false } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: "User ID required",
+      });
+    }
+
+    const gameAccess = await authManager.checkGameAccess(
+      userId,
+      requiresPremium
+    );
+
+    return res.json({
+      success: true,
+      ...gameAccess,
+    });
+  } catch (error) {
+    logger.error("Error checking game access:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to check game access",
+    });
+  }
+});
+
+app.post("/api/game/consume", async (req: Request, res: Response) => {
+  try {
+    const { userId, isPremiumGame = false, gameSessionId, roomCode } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: "User ID required",
+      });
+    }
+
+    const gameAccess = await authManager.checkGameAccess(userId, isPremiumGame);
+
+    if (!gameAccess.hasAccess) {
+      return res.status(403).json({
+        success: false,
+        error: gameAccess.reason || "No game access available",
+        gameAccess,
+      });
+    }
+
+    const consumeResult = await authManager.consumeGame(userId, isPremiumGame);
+
+    if (!consumeResult.success) {
+      return res.status(400).json(consumeResult);
+    }
+
+    if (gameSessionId && roomCode) {
+      await authManager.recordGameStart(userId, gameSessionId, roomCode, {
+        maxPlayers: 10,
+        humanCount: 1,
+        aiCount: 9,
+        premiumModelsEnabled: isPremiumGame,
+      });
+    }
+
+    logger.info("Game consumed", {
+      userId,
+      isPremiumGame,
+      gamesRemaining: consumeResult.gamesRemaining,
+      gameSessionId,
+    });
+
+    return res.json({
+      success: true,
+      message: consumeResult.message,
+      gamesRemaining: consumeResult.gamesRemaining,
+      gameAccess: await authManager.checkGameAccess(userId, isPremiumGame),
+    });
+  } catch (error) {
+    logger.error("Error consuming game:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to consume game",
+    });
+  }
+});
+
+// ================================
+// CREATOR TOOLS & ADMIN
+// ================================
 
 app.post("/api/verify-creator", (req: Request, res: Response) => {
   try {
@@ -630,25 +1011,54 @@ app.post("/api/verify-creator", (req: Request, res: Response) => {
   }
 });
 
-app.post("/api/creator/ai-only-game", (req: Request, res: Response) => {
+app.post("/api/creator/ai-only-game", async (req: Request, res: Response) => {
   try {
     const { password, gameConfig } = req.body;
     const creatorPassword = process.env.CREATOR_BYPASS_PASSWORD;
 
     if (!creatorPassword || password !== creatorPassword) {
       return res.status(401).json({
-        valid: false,
+        success: false,
         message: "Creator access required",
       });
     }
 
-    const roomInfo = gameSocketServer.createAIOnlyGame(gameConfig);
+    const enhancedConfig = {
+      maxPlayers: 10,
+      aiCount: 10,
+      humanCount: 0,
+      premiumModelsEnabled: true,
+      allowSpectators: true,
+      nightPhaseDuration: 60,
+      discussionPhaseDuration: 180,
+      votingPhaseDuration: 90,
+      ...gameConfig,
+    };
 
-    logger.info("AI-only game created by creator", { roomInfo });
+    const roomInfo = gameSocketServer.createAIOnlyGame(enhancedConfig);
+
+    const gameSessionId = roomInfo.id;
+    await authManager.recordGameStart(
+      "admin",
+      gameSessionId,
+      roomInfo.code,
+      enhancedConfig
+    );
+
+    logger.info("AI-only game created by creator", {
+      roomInfo,
+      config: enhancedConfig,
+    });
+
     return res.json({
       success: true,
-      message: "AI-only game created with real AI",
-      roomInfo,
+      message: "AI-only game created with premium models",
+      roomInfo: {
+        ...roomInfo,
+        observerUrl: `${process.env.FRONTEND_URL}/game/${roomInfo.code}?observer=true`,
+        adminAccess: true,
+      },
+      config: enhancedConfig,
     });
   } catch (error) {
     logger.error("AI-only game creation error:", error);
@@ -659,8 +1069,6 @@ app.post("/api/creator/ai-only-game", (req: Request, res: Response) => {
     });
   }
 });
-
-// 🚀 ENHANCED CREATOR ENDPOINTS - Advanced Dashboard Functionality
 
 app.post("/api/creator/active-games", (req: Request, res: Response) => {
   try {
@@ -676,7 +1084,6 @@ app.post("/api/creator/active-games", (req: Request, res: Response) => {
 
     const roomStats = gameSocketServer.getRoomStats();
 
-    // Safe room list processing
     const games = roomStats.roomList.map((room: any) => {
       return {
         id: room.id,
@@ -684,8 +1091,8 @@ app.post("/api/creator/active-games", (req: Request, res: Response) => {
         playerCount: room.playerCount,
         maxPlayers: room.maxPlayers || 10,
         phase: room.gameInProgress ? "active" : "waiting",
-        gamePhase: "unknown", // Safe default
-        currentRound: 0, // Safe default
+        gamePhase: "unknown",
+        currentRound: 0,
         isAIOnly: (room.humanCount || 0) === 0,
         humanCount: room.humanCount || 0,
         aiCount: room.aiCount || 0,
@@ -694,8 +1101,8 @@ app.post("/api/creator/active-games", (req: Request, res: Response) => {
         duration: room.gameInProgress
           ? Math.floor((Date.now() - new Date(room.createdAt).getTime()) / 1000)
           : 0,
-        aiModels: [], // Safe default
-        participants: [], // Safe default
+        aiModels: [],
+        participants: [],
         gameStats: {
           messagesCount: 0,
           votesCount: 0,
@@ -752,431 +1159,37 @@ app.post("/api/creator/active-games", (req: Request, res: Response) => {
   }
 });
 
-app.post("/api/creator/export-data", (req: Request, res: Response) => {
-  try {
-    const { password, format = "json" } = req.body;
-    const creatorPassword = process.env.CREATOR_BYPASS_PASSWORD;
-
-    if (!creatorPassword || password !== creatorPassword) {
-      return res.status(401).json({
-        valid: false,
-        message: "Creator access required",
-      });
-    }
-
-    const roomStats = gameSocketServer.getRoomStats();
-    const aiStats = gameSocketServer.getAIUsageStats();
-
-    const exportData = {
-      exportInfo: {
-        timestamp: new Date().toISOString(),
-        version: "2.1.0",
-        exportedBy: "creator",
-        serverUptime: process.uptime(),
-        format,
-        dataTypes: ["rooms", "ai", "server", "analytics"],
-        realAI: true,
-      },
-      gameData: {
-        rooms: roomStats,
-        totalRooms: roomStats.totalRooms,
-        activeRooms: roomStats.activeRooms,
-        totalPlayers: roomStats.totalPlayers,
-        roomDistribution: {
-          waiting: roomStats.roomList.filter((r: any) => !r.gameInProgress)
-            .length,
-          active: roomStats.roomList.filter((r: any) => r.gameInProgress)
-            .length,
-          aiOnly: roomStats.roomList.filter(
-            (r: any) => (r.humanCount || 0) === 0
-          ).length,
-        },
-      },
-      aiData: {
-        usageStats: Array.from(aiStats.entries()),
-        realAIActive: true,
-        aiMetrics: {
-          totalRequests: safeSumAIStats(aiStats, "totalRequests"),
-          totalCost: safeSumAIStats(aiStats, "totalCost"),
-          averageResponseTime: (() => {
-            const sum = safeSumAIStats(aiStats, "averageResponseTime");
-            return aiStats.size > 0 ? sum / aiStats.size : 0;
-          })(),
-        },
-      },
-      serverData: {
-        uptime: process.uptime(),
-        memoryUsage: process.memoryUsage(),
-        environment: process.env.NODE_ENV,
-        nodeVersion: process.version,
-        platform: process.platform,
-        arch: process.arch,
-        loadAverage: getLoadAverage(),
-        cpuUsage: getSafeCpuUsage(),
-        realAIIntegrated: true,
-      },
-      analytics: {
-        totalGamesCreated: roomStats.totalRooms,
-        totalPlayersServed: roomStats.totalPlayers,
-        averageGameDuration: 1800, // 30 minutes estimate
-        peakConcurrentUsers: Math.max(roomStats.totalPlayers, 10),
-        playerTypeDistribution: {
-          human: roomStats.roomList.reduce(
-            (sum: number, room: any) => sum + (room.humanCount || 0),
-            0
-          ),
-          ai: roomStats.roomList.reduce(
-            (sum: number, room: any) => sum + (room.aiCount || 0),
-            0
-          ),
-        },
-        realAIMetrics: {
-          totalAIResponses: safeSumAIStats(aiStats, "totalRequests"),
-          totalAICost: safeSumAIStats(aiStats, "totalCost"),
-          averageResponseQuality: 9.2, // High quality with real AI
-        },
-      },
-      performance: {
-        responseTime: Date.now() - Date.now(),
-        memoryEfficiency: {
-          heapUsed: process.memoryUsage().heapUsed,
-          heapTotal: process.memoryUsage().heapTotal,
-          external: process.memoryUsage().external,
-          rss: process.memoryUsage().rss,
-        },
-        systemLoad: getLoadAverage(),
-        realAIPerformance: "excellent",
-      },
-    };
-
-    const filename = `ai-mafia-real-ai-export-${
-      new Date().toISOString().split("T")[0]
-    }-${Date.now()}.json`;
-
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.setHeader("X-Export-Type", "ai-mafia-real-ai-data");
-    res.setHeader("X-Export-Version", "2.1.0");
-
-    logger.info(`Creator exported comprehensive real AI data: ${filename}`);
-    return res.json(exportData);
-  } catch (error) {
-    logger.error("Data export error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to export data",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
-});
-
-app.post("/api/creator/terminate-game", (req: Request, res: Response) => {
-  try {
-    const { password, gameId, reason = "Terminated by creator" } = req.body;
-    const creatorPassword = process.env.CREATOR_BYPASS_PASSWORD;
-
-    if (!creatorPassword || password !== creatorPassword) {
-      return res.status(401).json({
-        valid: false,
-        message: "Creator access required",
-      });
-    }
-
-    if (!gameId) {
-      return res.status(400).json({
-        success: false,
-        message: "Game ID is required",
-        validationErrors: ["gameId is required"],
-      });
-    }
-
-    // Find the room and get details before termination
-    const rooms = gameSocketServer.getRoomStats().roomList;
-    const room = rooms.find((r: any) => r.id === gameId);
-
-    if (room) {
-      // Get detailed info before termination
-      const preTerminationInfo = {
-        id: room.id,
-        roomCode: room.code,
-        playerCount: room.playerCount,
-        gameInProgress: room.gameInProgress,
-        createdAt: room.createdAt,
-        humanCount: room.humanCount || 0,
-        aiCount: room.aiCount || 0,
-        realAI: true,
-      };
-
-      // Perform termination
-      const terminationResult = gameSocketServer.terminateRoom(room.id, reason);
-
-      logger.info(
-        `Creator terminated real AI game: ${gameId} (Room: ${room.code}) - ${reason}`,
-        {
-          preTerminationInfo,
-          terminationResult,
-        }
-      );
-
-      return res.json({
-        success: true,
-        message: "Real AI game terminated successfully",
-        terminatedGame: {
-          ...preTerminationInfo,
-          terminatedAt: new Date().toISOString(),
-          reason,
-          terminationResult,
-        },
-        action: "real_ai_game_terminated",
-      });
-    } else {
-      logger.warn(`Creator tried to terminate non-existent game: ${gameId}`);
-      return res.status(404).json({
-        success: false,
-        message: "Game not found",
-        gameId,
-        availableGames: rooms.map((r: any) => ({ id: r.id, code: r.code })),
-      });
-    }
-  } catch (error) {
-    logger.error("Game termination error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to terminate game",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
-});
-
-// 🔧 ADDITIONAL CREATOR UTILITIES
-
-app.post("/api/creator/game-details", (req: Request, res: Response) => {
-  try {
-    const { password, gameId } = req.body;
-    const creatorPassword = process.env.CREATOR_BYPASS_PASSWORD;
-
-    if (!creatorPassword || password !== creatorPassword) {
-      return res.status(401).json({
-        valid: false,
-        message: "Creator access required",
-      });
-    }
-
-    if (!gameId) {
-      return res.status(400).json({
-        success: false,
-        message: "Game ID is required",
-      });
-    }
-
-    // Safe fallback for game details
-    const rooms = gameSocketServer.getRoomStats().roomList;
-    const room = rooms.find((r: any) => r.id === gameId);
-
-    if (room) {
-      const gameDetails = {
-        id: room.id,
-        code: room.code,
-        playerCount: room.playerCount,
-        gameInProgress: room.gameInProgress,
-        createdAt: room.createdAt,
-        humanCount: room.humanCount || 0,
-        aiCount: room.aiCount || 0,
-        premiumModelsEnabled: room.premiumModelsEnabled || false,
-        realAI: true,
-        // Safe defaults for detailed data
-        gameState: null,
-        players: [],
-        aiModels: [],
-        statistics: {
-          totalMessages: 0,
-          totalVotes: 0,
-          gameDuration: Date.now() - new Date(room.createdAt).getTime(),
-          averageMessageLength: 0,
-        },
-      };
-
-      return res.json({
-        success: true,
-        gameDetails,
-        timestamp: new Date().toISOString(),
-      });
-    } else {
-      return res.status(404).json({
-        success: false,
-        message: "Game not found",
-        gameId,
-      });
-    }
-  } catch (error) {
-    logger.error("Error fetching game details:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch game details",
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
-});
-
-app.post("/api/creator/server-metrics", (req: Request, res: Response) => {
+app.post("/api/admin/analytics", async (req: Request, res: Response) => {
   try {
     const { password } = req.body;
     const creatorPassword = process.env.CREATOR_BYPASS_PASSWORD;
 
     if (!creatorPassword || password !== creatorPassword) {
       return res.status(401).json({
-        valid: false,
-        message: "Creator access required",
+        success: false,
+        message: "Admin access required",
       });
     }
 
-    const metrics = {
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      memory: process.memoryUsage(),
-      cpu: getSafeCpuUsage(),
-      loadAverage: getLoadAverage(),
-      platform: {
-        arch: process.arch,
-        platform: process.platform,
-        nodeVersion: process.version,
-        pid: process.pid,
-      },
-      network: {
-        port: PORT,
-        host: HOST,
-        environment: process.env.NODE_ENV,
-      },
-      gameServer: {
-        realAI: true,
-        personalitiesActive: true,
-        observerModeEnabled: true,
-        smartPhasesEnabled: true,
-      },
-    };
+    const analytics = await authManager.getSystemAnalytics();
 
     return res.json({
       success: true,
-      metrics,
+      analytics,
+      timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    logger.error("Error fetching server metrics:", error);
+    logger.error("Error fetching admin analytics:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch server metrics",
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: "Failed to fetch analytics",
     });
   }
 });
 
-// Standard endpoints
-app.post("/api/auth/signup", async (req: Request, res: Response) => {
-  try {
-    const { email, password, username } = req.body;
-
-    if (!email || !password || !username) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    return res.status(201).json({
-      success: true,
-      user: { id: `user_${Date.now()}`, email, username },
-      message: "Account created successfully",
-    });
-  } catch (error) {
-    logger.error("Signup error:", error);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-app.post("/api/auth/signin", async (req: Request, res: Response) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: "Missing email or password" });
-    }
-
-    return res.json({
-      success: true,
-      user: { id: `user_${Date.now()}`, email },
-      session: { access_token: `token_${Date.now()}` },
-      message: "Signed in successfully",
-    });
-  } catch (error) {
-    logger.error("Signin error:", error);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-app.get("/api/packages", async (_req: Request, res: Response) => {
-  const packages = [
-    {
-      id: "starter",
-      name: "Starter Package",
-      price: 5.0,
-      games: 10,
-      duration: "3 months",
-      features: [
-        "Premium AI models",
-        "Advanced analytics",
-        "Ad-free experience",
-        "Observer mode",
-      ],
-    },
-    {
-      id: "social",
-      name: "Social Package",
-      price: 10.0,
-      games: 25,
-      duration: "3 months",
-      features: [
-        "All Starter features",
-        "Game recording",
-        "Custom rooms",
-        "AI reasoning visible",
-      ],
-    },
-    {
-      id: "pro",
-      name: "Pro Package",
-      price: 20.0,
-      games: 60,
-      duration: "6 months",
-      features: [
-        "All Social features",
-        "Data export",
-        "Priority support",
-        "Full observer dashboard",
-      ],
-    },
-  ];
-
-  res.json({ packages });
-});
-
-app.get("/api/user/packages", async (req: Request, res: Response) => {
-  const packages = [
-    {
-      id: "demo_package",
-      name: "Demo Premium Access",
-      gamesRemaining: 25,
-      totalGames: 50,
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      features: [
-        "Premium AI models",
-        "Advanced analytics",
-        "Game recording",
-        "Observer mode",
-        "AI reasoning visible",
-      ],
-      premiumModelsEnabled: true,
-      realAI: true,
-    },
-  ];
-
-  res.json({ packages });
-});
+// ================================
+// TEST & UTILITY ENDPOINTS
+// ================================
 
 app.get("/api/railway-test", (_req: Request, res: Response) => {
   res.json({
@@ -1193,6 +1206,10 @@ app.get("/api/railway-test", (_req: Request, res: Response) => {
     detective: "🕵️‍♂️ Railway + Real AI is working perfectly!",
   });
 });
+
+// ================================
+// ERROR HANDLING MIDDLEWARE
+// ================================
 
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   logger.error("Server error:", {
@@ -1223,15 +1240,20 @@ app.use("*", (_req: Request, res: Response) => {
       "/api/stats",
       "/api/game-modes",
       "/api/personalities",
-      "/api/railway-test",
-      "/api/creator/active-games",
-      "/api/creator/export-data",
-      "/api/creator/terminate-game",
-      "/api/creator/game-details",
-      "/api/creator/server-metrics",
+      "/api/packages",
+      "/api/auth/signup",
+      "/api/auth/signin",
+      "/api/setup-admin",
+      "/api/game/check-access",
+      "/api/game/consume",
+      "/api/creator/*",
     ],
   });
 });
+
+// ================================
+// BACKGROUND TASKS
+// ================================
 
 const startBackgroundTasks = () => {
   setInterval(() => {
@@ -1244,11 +1266,39 @@ const startBackgroundTasks = () => {
   }, 24 * 60 * 60 * 1000);
 };
 
+// ================================
+// SERVER INITIALIZATION
+// ================================
+
+const initializeServer = async () => {
+  logger.info("🚀 Initializing AI Mafia Server...");
+
+  try {
+    const adminResult = await authManager.setupAdminUser();
+    if (adminResult.success) {
+      logger.info("✅ Admin user ready", {
+        userId: adminResult.userId,
+        email: "ahiya.butman@gmail.com",
+      });
+    } else {
+      logger.warn("⚠️ Admin setup issue:", adminResult.message);
+    }
+  } catch (error) {
+    logger.error("❌ Admin setup failed:", error);
+  }
+
+  logger.info("🎮 Server initialization complete");
+};
+
+// ================================
+// SERVER STARTUP
+// ================================
+
 httpServer.listen(PORT, HOST as string, () => {
   logger.info(`🎮 AI Mafia Server with Real AI running on ${HOST}:${PORT}`);
   logger.info(`🔌 WebSocket server: ready`);
   logger.info(
-    `🗄️  Database: ${database ? `connected (${database.type})` : "disabled"}`
+    `🗄️ Database: ${database ? `connected (${database.type})` : "disabled"}`
   );
   logger.info(`🤖 Real AI models: OpenAI, Anthropic, Google`);
   logger.info(`🎭 50+ AI personalities loaded`);
@@ -1265,15 +1315,20 @@ httpServer.listen(PORT, HOST as string, () => {
   logger.info(`🔧 Creator endpoints: enhanced`);
 
   startBackgroundTasks();
+  initializeServer();
 
   if (process.env.NODE_ENV === "development") {
     logger.info(`📊 Stats: http://${HOST}:${PORT}/api/stats`);
-    logger.info(`❤️  Health: http://${HOST}:${PORT}/health`);
+    logger.info(`❤️ Health: http://${HOST}:${PORT}/health`);
     logger.info(`🎪 Game modes: http://${HOST}:${PORT}/api/game-modes`);
     logger.info(`🎭 Personalities: http://${HOST}:${PORT}/api/personalities`);
     logger.info(`🔧 Creator tools: http://${HOST}:${PORT}/api/creator/*`);
   }
 });
+
+// ================================
+// GRACEFUL SHUTDOWN
+// ================================
 
 const gracefulShutdown = (signal: string) => {
   logger.info(`${signal} received, shutting down gracefully...`);

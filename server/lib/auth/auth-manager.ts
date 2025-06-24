@@ -1,4 +1,4 @@
-// server/lib/auth/auth-manager.ts
+// server/lib/auth/auth-manager.ts - FIXED: Correct Supabase Schema Integration
 import { createClient } from "@supabase/supabase-js";
 import { User, Session } from "@supabase/supabase-js";
 
@@ -11,7 +11,9 @@ export interface UserProfile {
   ai_detection_accuracy: number;
   preferred_ai_tier: "free" | "premium";
   is_creator: boolean;
+  is_verified: boolean;
   created_at: string;
+  last_login?: string;
 }
 
 export interface UserPackage {
@@ -22,6 +24,8 @@ export interface UserPackage {
   expires_at: string;
   is_active: boolean;
   features: string[];
+  amount_paid: number;
+  purchase_date: string;
 }
 
 export interface GamePackage {
@@ -35,6 +39,15 @@ export interface GamePackage {
   is_active: boolean;
 }
 
+export interface GameAccessResult {
+  hasAccess: boolean;
+  accessType: "admin" | "premium_package" | "free" | "none";
+  gamesRemaining: number;
+  packageType: string;
+  premiumFeatures: boolean;
+  reason?: string;
+}
+
 export class AuthManager {
   private supabase;
 
@@ -45,7 +58,10 @@ export class AuthManager {
     );
   }
 
-  // User Authentication
+  // ================================
+  // USER AUTHENTICATION & MANAGEMENT
+  // ================================
+
   async createUser(
     email: string,
     password: string,
@@ -61,7 +77,7 @@ export class AuthManager {
 
       if (authError) return { user: null, error: authError };
 
-      // Create user profile
+      // Create user profile with correct field names
       if (authData.user) {
         const { error: profileError } = await this.supabase
           .from("users")
@@ -70,16 +86,48 @@ export class AuthManager {
             username,
             email,
             is_verified: false,
+            total_games_played: 0,
+            total_wins: 0,
+            ai_detection_accuracy: 0.0,
+            preferred_ai_tier: "free",
+            is_creator: false,
           });
 
         if (profileError) {
           console.error("Profile creation error:", profileError);
+          return { user: null, error: profileError };
         }
+
+        // Give new users the free monthly package
+        await this.grantFreeMonthlyPackage(authData.user.id);
       }
 
       return { user: authData.user, error: null };
     } catch (error) {
       return { user: null, error };
+    }
+  }
+
+  async signInUser(
+    email: string,
+    password: string
+  ): Promise<{ user: User | null; session: Session | null; error: any }> {
+    try {
+      const { data, error } = await this.supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) return { user: null, session: null, error };
+
+      // Update last login
+      if (data.user) {
+        await this.updateLastLogin(data.user.id);
+      }
+
+      return { user: data.user, session: data.session, error: null };
+    } catch (error) {
+      return { user: null, session: null, error };
     }
   }
 
@@ -120,7 +168,122 @@ export class AuthManager {
     }
   }
 
-  // Package Management
+  private async updateLastLogin(userId: string): Promise<void> {
+    try {
+      await this.supabase
+        .from("users")
+        .update({ last_login: new Date().toISOString() })
+        .eq("id", userId);
+    } catch (error) {
+      console.error("Error updating last login:", error);
+    }
+  }
+
+  // ================================
+  // ADMIN USER SETUP
+  // ================================
+
+  async setupAdminUser(
+    email: string = "ahiya.butman@gmail.com",
+    password: string = "detective_ai_mafia_2025"
+  ): Promise<{ success: boolean; message: string; userId?: string }> {
+    try {
+      // Try to find existing user
+      const { data: existingUser, error: findError } = await this.supabase
+        .from("users")
+        .select("id, email, is_creator")
+        .eq("email", email)
+        .single();
+
+      if (existingUser) {
+        // Update existing user to admin
+        const { error: updateError } = await this.supabase
+          .from("users")
+          .update({
+            is_creator: true,
+            creator_permissions: [
+              "unlimited_games",
+              "premium_models",
+              "admin_tools",
+              "ai_only_games",
+              "analytics_export",
+              "user_management",
+              "database_access",
+            ],
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingUser.id);
+
+        if (updateError) {
+          return {
+            success: false,
+            message: `Failed to update user to admin: ${updateError.message}`,
+          };
+        }
+
+        return {
+          success: true,
+          message: "User updated to admin successfully",
+          userId: existingUser.id,
+        };
+      } else {
+        // Create new admin user
+        const { user, error } = await this.createUser(email, password, "Admin");
+
+        if (error || !user) {
+          return {
+            success: false,
+            message: `Failed to create admin user: ${
+              error?.message || "Unknown error"
+            }`,
+          };
+        }
+
+        // Update to admin permissions
+        const { error: adminError } = await this.supabase
+          .from("users")
+          .update({
+            is_creator: true,
+            creator_permissions: [
+              "unlimited_games",
+              "premium_models",
+              "admin_tools",
+              "ai_only_games",
+              "analytics_export",
+              "user_management",
+              "database_access",
+            ],
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", user.id);
+
+        if (adminError) {
+          return {
+            success: false,
+            message: `Failed to set admin permissions: ${adminError.message}`,
+          };
+        }
+
+        return {
+          success: true,
+          message: "Admin user created successfully",
+          userId: user.id,
+        };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        message: `Admin setup failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
+      };
+    }
+  }
+
+  // ================================
+  // PACKAGE MANAGEMENT
+  // ================================
+
   async getAvailablePackages(): Promise<GamePackage[]> {
     try {
       const { data, error } = await this.supabase
@@ -173,6 +336,8 @@ export class AuthManager {
           expires_at: pkg.expires_at,
           is_active: pkg.is_active,
           features: pkg.packages?.features || [],
+          amount_paid: pkg.amount_paid,
+          purchase_date: pkg.purchase_date,
         })) || []
       );
     } catch (error) {
@@ -186,7 +351,7 @@ export class AuthManager {
     packageId: string,
     paypalTransactionId: string,
     amountPaid: number
-  ): Promise<boolean> {
+  ): Promise<{ success: boolean; message: string; packageInfo?: any }> {
     try {
       // Get package details
       const { data: packageData, error: packageError } = await this.supabase
@@ -196,8 +361,7 @@ export class AuthManager {
         .single();
 
       if (packageError || !packageData) {
-        console.error("Package not found:", packageError);
-        return false;
+        return { success: false, message: "Package not found" };
       }
 
       // Calculate expiration date
@@ -205,7 +369,7 @@ export class AuthManager {
       expiresAt.setDate(expiresAt.getDate() + packageData.expiration_days);
 
       // Create user package
-      const { error: userPackageError } = await this.supabase
+      const { data: userPackage, error: userPackageError } = await this.supabase
         .from("user_packages")
         .insert({
           user_id: userId,
@@ -213,7 +377,10 @@ export class AuthManager {
           games_remaining: packageData.games_included,
           expires_at: expiresAt.toISOString(),
           amount_paid: amountPaid,
-        });
+          purchase_date: new Date().toISOString(),
+        })
+        .select()
+        .single();
 
       // Record payment transaction
       const { error: transactionError } = await this.supabase
@@ -234,129 +401,134 @@ export class AuthManager {
           userPackageError,
           transactionError,
         });
-        return false;
+        return { success: false, message: "Failed to complete purchase" };
       }
 
-      return true;
+      return {
+        success: true,
+        message: `Successfully purchased ${packageData.name}`,
+        packageInfo: {
+          ...userPackage,
+          package_name: packageData.name,
+          features: packageData.features,
+        },
+      };
     } catch (error) {
       console.error("Error in purchasePackage:", error);
-      return false;
+      return { success: false, message: "Purchase failed due to system error" };
     }
   }
 
-  async consumeGame(userId: string, features: string[] = []): Promise<boolean> {
-    try {
-      // Find a valid package that has the required features
-      const { data: userPackages, error } = await this.supabase
-        .from("user_packages")
-        .select(
-          `
-          *,
-          packages:package_id (
-            features
-          )
-        `
-        )
-        .eq("user_id", userId)
-        .eq("is_active", true)
-        .gt("games_remaining", 0)
-        .gte("expires_at", new Date().toISOString())
-        .order("expires_at", { ascending: true });
+  // ================================
+  // GAME ACCESS CONTROL
+  // ================================
 
-      if (error || !userPackages?.length) {
-        return false; // No valid packages
-      }
-
-      // Find package with required features
-      const validPackage = userPackages.find((pkg: any) => {
-        const packageFeatures = pkg.packages?.features || [];
-        return features.every((feature) => packageFeatures.includes(feature));
-      });
-
-      if (!validPackage) {
-        return false; // No package with required features
-      }
-
-      // Consume one game
-      const { error: updateError } = await this.supabase
-        .from("user_packages")
-        .update({
-          games_remaining: validPackage.games_remaining - 1,
-          is_active: validPackage.games_remaining - 1 > 0,
-        })
-        .eq("id", validPackage.id);
-
-      return !updateError;
-    } catch (error) {
-      console.error("Error consuming game:", error);
-      return false;
-    }
-  }
-
-  async checkUserAccess(
+  async checkGameAccess(
     userId: string,
-    features: string[] = []
-  ): Promise<{
-    hasAccess: boolean;
-    packageType: "free" | "premium";
-    gamesRemaining: number;
-  }> {
+    requiresPremium: boolean = false
+  ): Promise<GameAccessResult> {
     try {
-      const userPackages = await this.getUserPackages(userId);
+      // Use the SQL function we created
+      const { data, error } = await this.supabase.rpc(
+        "check_user_game_access",
+        {
+          user_uuid: userId,
+          requires_premium: requiresPremium,
+        }
+      );
 
-      // Check for package with required features
-      const validPackage = userPackages.find((pkg) => {
-        return features.every((feature) => pkg.features.includes(feature));
-      });
-
-      if (validPackage) {
+      if (error) {
+        console.error("Error checking game access:", error);
         return {
-          hasAccess: true,
-          packageType: validPackage.features.includes("premium_models")
-            ? "premium"
-            : "free",
-          gamesRemaining: validPackage.games_remaining,
+          hasAccess: false,
+          accessType: "none",
+          gamesRemaining: 0,
+          packageType: "none",
+          premiumFeatures: false,
+          reason: "System error",
         };
       }
 
-      // Check for free daily access
-      const today = new Date().toDateString();
-      const { data: todayGames, error } = await this.supabase
-        .from("player_sessions")
-        .select("created_at")
-        .eq("user_id", userId)
-        .gte("created_at", today)
-        .limit(1);
-
-      if (error) {
-        console.error("Error checking daily access:", error);
-        return { hasAccess: false, packageType: "free", gamesRemaining: 0 };
-      }
-
-      // Free daily game available if no games played today
-      return {
-        hasAccess: !todayGames?.length,
-        packageType: "free",
-        gamesRemaining: todayGames?.length ? 0 : 1,
-      };
+      return data;
     } catch (error) {
-      console.error("Error checking user access:", error);
-      return { hasAccess: false, packageType: "free", gamesRemaining: 0 };
+      console.error("Error in checkGameAccess:", error);
+      return {
+        hasAccess: false,
+        accessType: "none",
+        gamesRemaining: 0,
+        packageType: "none",
+        premiumFeatures: false,
+        reason: "System error",
+      };
     }
   }
 
-  // Analytics helpers
+  async consumeGame(
+    userId: string,
+    isPremiumGame: boolean = false
+  ): Promise<{ success: boolean; message: string; gamesRemaining: number }> {
+    try {
+      // Use the SQL function we created
+      const { data, error } = await this.supabase.rpc("consume_user_game", {
+        user_uuid: userId,
+        is_premium_game: isPremiumGame,
+      });
+
+      if (error) {
+        console.error("Error consuming game:", error);
+        return {
+          success: false,
+          message: "Failed to consume game",
+          gamesRemaining: 0,
+        };
+      }
+
+      return {
+        success: data.success,
+        message: data.message,
+        gamesRemaining: data.gamesRemaining,
+      };
+    } catch (error) {
+      console.error("Error in consumeGame:", error);
+      return {
+        success: false,
+        message: "System error",
+        gamesRemaining: 0,
+      };
+    }
+  }
+
+  // ================================
+  // ANALYTICS & GAME TRACKING
+  // ================================
+
   async recordGameStart(
     userId: string,
     gameSessionId: string,
-    roomCode: string
+    roomCode: string,
+    gameConfig: any
   ): Promise<void> {
     try {
       await this.supabase.from("game_sessions").insert({
         id: gameSessionId,
         room_code: roomCode,
+        total_players: gameConfig.maxPlayers || 10,
+        human_players: gameConfig.humanCount || 1,
+        ai_players: gameConfig.aiCount || 9,
+        premium_models_enabled: gameConfig.premiumModelsEnabled || false,
         started_at: new Date().toISOString(),
       });
+
+      // Record player session
+      await this.supabase.from("player_sessions").insert({
+        game_session_id: gameSessionId,
+        user_id: userId,
+        player_name: "Human Player", // This should come from the actual player name
+        player_type: "human",
+        assigned_role: "unknown", // Will be updated when roles are assigned
+      });
+
+      console.log(`🎮 Game session recorded: ${gameSessionId}`);
     } catch (error) {
       console.error("Error recording game start:", error);
     }
@@ -368,7 +540,8 @@ export class AuthManager {
     winReason: string,
     totalRounds: number,
     aiCost: number,
-    aiRequests: number
+    aiRequests: number,
+    gameDurationSeconds: number
   ): Promise<void> {
     try {
       await this.supabase
@@ -380,10 +553,130 @@ export class AuthManager {
           total_rounds: totalRounds,
           total_ai_cost: aiCost,
           ai_requests_made: aiRequests,
+          duration_seconds: gameDurationSeconds,
         })
         .eq("id", gameSessionId);
+
+      console.log(`📊 Game session completed: ${gameSessionId}`);
     } catch (error) {
       console.error("Error recording game end:", error);
+    }
+  }
+
+  async recordGameAnalytics(
+    gameSessionId: string,
+    eventType: string,
+    eventData: any,
+    gamePhase: string,
+    roundNumber: number,
+    playerId?: string,
+    aiModel?: string,
+    aiCost?: number,
+    aiTokens?: number,
+    aiResponseTime?: number
+  ): Promise<void> {
+    try {
+      await this.supabase.from("game_analytics").insert({
+        game_session_id: gameSessionId,
+        event_type: eventType,
+        event_data: eventData,
+        game_phase: gamePhase,
+        round_number: roundNumber,
+        player_id: playerId,
+        ai_model: aiModel,
+        ai_cost: aiCost || 0,
+        ai_tokens_used: aiTokens || 0,
+        ai_response_time_ms: aiResponseTime || 0,
+      });
+    } catch (error) {
+      console.error("Error recording game analytics:", error);
+    }
+  }
+
+  // ================================
+  // UTILITY FUNCTIONS
+  // ================================
+
+  private async grantFreeMonthlyPackage(userId: string): Promise<void> {
+    try {
+      // Get the free monthly package
+      const { data: freePackage, error: packageError } = await this.supabase
+        .from("packages")
+        .select("*")
+        .eq("name", "Free Monthly")
+        .single();
+
+      if (packageError || !freePackage) {
+        console.error("Free package not found:", packageError);
+        return;
+      }
+
+      // Grant the package
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + freePackage.expiration_days);
+
+      await this.supabase.from("user_packages").insert({
+        user_id: userId,
+        package_id: freePackage.id,
+        games_remaining: freePackage.games_included,
+        expires_at: expiresAt.toISOString(),
+        amount_paid: 0,
+        purchase_date: new Date().toISOString(),
+      });
+
+      console.log(`🎁 Granted free monthly package to user ${userId}`);
+    } catch (error) {
+      console.error("Error granting free package:", error);
+    }
+  }
+
+  // ================================
+  // ADMIN ANALYTICS
+  // ================================
+
+  async getSystemAnalytics(): Promise<any> {
+    try {
+      const [usersData, gamesData, revenueData, aiUsageData] =
+        await Promise.all([
+          this.supabase
+            .from("users")
+            .select("id, created_at, total_games_played")
+            .order("created_at", { ascending: false })
+            .limit(100),
+          this.supabase
+            .from("game_sessions")
+            .select("*")
+            .order("started_at", { ascending: false })
+            .limit(100),
+          this.supabase
+            .from("payment_transactions")
+            .select("amount, created_at, status")
+            .eq("status", "completed"),
+          this.supabase
+            .from("ai_usage_stats")
+            .select("*")
+            .order("date", { ascending: false })
+            .limit(30),
+        ]);
+
+      return {
+        users: {
+          total: usersData.data?.length || 0,
+          recent: usersData.data?.slice(0, 10) || [],
+        },
+        games: {
+          total: gamesData.data?.length || 0,
+          recent: gamesData.data?.slice(0, 10) || [],
+        },
+        revenue: {
+          total: revenueData.data?.reduce((sum, t) => sum + t.amount, 0) || 0,
+          transactions: revenueData.data?.length || 0,
+        },
+        aiUsage: aiUsageData.data || [],
+      };
+    } catch (error) {
+      console.error("Error fetching system analytics:", error);
+      return {};
     }
   }
 }
