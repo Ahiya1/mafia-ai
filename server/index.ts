@@ -1419,14 +1419,14 @@ app.get("/api/debug/game/:roomId", (req: Request, res: Response) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       room,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     logger.error("Debug endpoint error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       error: "Internal server error",
       timestamp: new Date().toISOString(),
     });
