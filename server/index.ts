@@ -231,6 +231,8 @@ const logger = winston.createLogger({
 
 // Initialize Express app and server
 const app = express();
+// Fix for X-Forwarded-For header issue
+app.set("trust proxy", true);
 const httpServer = createServer(app);
 const gameSocketServer = new GameSocketServer(httpServer);
 

@@ -61,6 +61,8 @@ export class GameSocketServer {
   private setupDebugEndpoints(): void {
     const express = require("express");
     const app = express();
+    // Fix for X-Forwarded-For header issue
+    app.set("trust proxy", true);
     app.use(express.json());
 
     // 🔥 DEBUG ENDPOINT 1: Game state inspection
