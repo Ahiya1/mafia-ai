@@ -1051,7 +1051,7 @@ export class GameOrchestrator
         this.gameState.currentRound++;
         this.discussionManager.startDiscussion(
           this.gameState.players,
-          this.gameState.gameConfig.speakingTimePerPlayer
+          this.gameState.gameConfig.speakingTimePerPlayer * 1000 // Convert to milliseconds
         );
         break;
 
@@ -1066,7 +1066,7 @@ export class GameOrchestrator
         this.votingManager.startVoting(
           this.gameState.players,
           discussionHistory,
-          this.gameState.gameConfig.votingPhaseDuration
+          this.gameState.gameConfig.votingPhaseDuration * 1000 // Convert to milliseconds
         );
         break;
 
@@ -1074,7 +1074,7 @@ export class GameOrchestrator
         this.nightManager.startNight(
           this.gameState.players,
           this.gameState.currentRound,
-          this.gameState.gameConfig.nightPhaseDuration
+          this.gameState.gameConfig.nightPhaseDuration * 1000 // Convert to milliseconds
         );
         break;
 
@@ -1314,11 +1314,11 @@ export class GameOrchestrator
 
     switch (phase) {
       case GamePhase.DISCUSSION:
-        return config.discussionPhaseDuration;
+        return config.discussionPhaseDuration * 1000; // Convert to milliseconds
       case GamePhase.VOTING:
-        return config.votingPhaseDuration;
+        return config.votingPhaseDuration * 1000; // Convert to milliseconds
       case GamePhase.NIGHT:
-        return config.nightPhaseDuration;
+        return config.nightPhaseDuration * 1000; // Convert to milliseconds
       case GamePhase.ROLE_ASSIGNMENT:
         return 5000; // 5 seconds
       default:
