@@ -244,12 +244,33 @@ export class ContextManager implements ContextManagerInterface {
         );
 
       case "night_action":
-        return await aiCoordinator.generateNightActionResponse(
-          playerId,
-          aiContext,
-          personality,
-          context
-        );
+        // Check if this is mafia coordination vs actual night action
+        if (context.data?.phase === "mafia_coordination") {
+          const availableTargets = context.data.available_targets || [];
+          return {
+            content: await aiCoordinator.generateMafiaCoordination(
+              playerId,
+              aiContext,
+              personality,
+              availableTargets
+            ),
+            confidence: 0.8,
+            metadata: {
+              model: personality.model,
+              tokensUsed: 50,
+              responseTime: 1000,
+              cost: 0.01,
+              timestamp: new Date(),
+            },
+          };
+        } else {
+          return await aiCoordinator.generateNightActionResponse(
+            playerId,
+            aiContext,
+            personality,
+            context
+          );
+        }
 
       default:
         throw new Error(`Unknown context type: ${context.type}`);
