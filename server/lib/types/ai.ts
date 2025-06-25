@@ -1,8 +1,5 @@
 // server/lib/types/ai.ts - Enhanced with Context Operations
-import { PlayerRole, GamePhase, PlayerId } from "./game";
-
-// Re-export AIModel from game types
-export { AIModel } from "./game";
+import { PlayerRole, GamePhase, PlayerId, AIModel } from "./game";
 
 // 🆕 NEW: Context Operation Types for AI Coordination
 export interface AIDecisionContext {
@@ -121,6 +118,7 @@ export interface BroadcastContextData {
 }
 
 export interface ContextStats {
+  totalErrors: any;
   totalTriggers: number;
   totalUpdates: number;
   totalPushes: number;
