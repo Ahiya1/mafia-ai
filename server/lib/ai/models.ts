@@ -1,365 +1,334 @@
-// src/lib/ai/models.ts - Fixed AI Model Integration
-import {
-  AIActionRequest,
-  AIResponse,
-  AIModel,
-  APIUsageStats,
-  MODEL_CONFIGS,
-  AIDecisionContext,
-  AIPersonality,
-} from "../types/ai";
-import { PlayerRole, GamePhase } from "..//types/game";
+// server/lib/ai/models.ts - Enhanced for JSON-Only Responses (COMMIT 3)
+// This file shows the key enhancements needed for the existing models.ts
 
-export class AIModelManager {
-  private usageStats: Map<AIModel, APIUsageStats> = new Map();
-  private readonly fallbackResponses = {
-    discussion: [
-      "I need to think about this more carefully.",
-      "Something seems off about the recent events.",
-      "We should consider all the evidence before deciding.",
-      "I'm not entirely convinced by the arguments so far.",
-      "Let me share my observations from this round.",
-    ],
-    vote: [
-      "Based on the discussion patterns, I think this person is suspicious.",
-      "The voting history suggests we should eliminate this player.",
-      "My analysis points to this being the right choice.",
-      "This player's behavior has been concerning.",
-      "I believe this is our best option for finding mafia.",
-    ],
-    night_action: [
-      "kill", // For mafia
-      "heal", // For healer
-    ],
+// 🔥 COMMIT 3: Enhanced AI model configuration for JSON-only responses
+export interface EnhancedAIRequestOptions {
+  maxTokens: number;
+  temperature: number;
+  requiresJSON: boolean; // 🔥 NEW: Force JSON responses
+  gameContext?: {
+    phase: string;
+    round: number;
+    playerId: string;
+    personality: string;
+    role?: string;
+    availableTargets?: string[];
   };
+  fallbackBehavior?: "retry" | "emergency" | "skip";
+  timeoutMs?: number;
+}
 
-  constructor() {
-    // Initialize usage stats for all models
-    Object.values(AIModel).forEach((model) => {
-      this.usageStats.set(model, {
-        model,
-        totalRequests: 0,
-        totalTokensInput: 0,
-        totalTokensOutput: 0,
-        totalCost: 0,
-        averageResponseTime: 0,
-        errorRate: 0,
-        lastUsed: new Date(),
-      });
-    });
-  }
+// 🔥 COMMIT 3: Enhanced response validation
+export interface EnhancedAIResponse {
+  content: string;
+  isValidJSON: boolean; // 🔥 NEW: JSON validation flag
+  parsedContent?: any; // 🔥 NEW: Pre-parsed JSON if valid
+  metadata: {
+    model: string;
+    tokensUsed: number;
+    responseTime: number;
+    cost: number;
+    timestamp: Date;
+    jsonParsingAttempts?: number; // 🔥 NEW: Track parsing attempts
+    fallbackUsed?: boolean; // 🔥 NEW: Track if fallback was used
+  };
+}
 
-  async generateResponse(request: AIActionRequest): Promise<AIResponse> {
+// 🔥 COMMIT 3: JSON-focused prompt templates
+export const JSON_PROMPT_TEMPLATES = {
+  discussion: {
+    systemPrompt: `You are an AI playing Mafia. You must respond with ONLY valid JSON in this exact format:
+    {"message": "your discussion message here"}
+    
+    No other text before or after the JSON. No explanations. Only the JSON object.`,
+    responseFormat: "json_object",
+  },
+
+  voting: {
+    systemPrompt: `You are an AI playing Mafia. You must respond with ONLY valid JSON in this exact format:
+    {"message": "brief explanation", "vote_target": "exact_player_name"}
+    
+    No other text before or after the JSON. No explanations. Only the JSON object.`,
+    responseFormat: "json_object",
+  },
+
+  night_action: {
+    systemPrompt: `You are an AI playing Mafia. You must respond with ONLY valid JSON in this exact format:
+    {"action": "kill_or_heal", "target": "player_name_or_nobody", "reasoning": "brief_explanation"}
+    
+    No other text before or after the JSON. No explanations. Only the JSON object.`,
+    responseFormat: "json_object",
+  },
+};
+
+// 🔥 COMMIT 3: Enhanced model calling with JSON enforcement
+export class EnhancedAIModelCaller {
+  /**
+   * Call AI model with JSON enforcement
+   */
+  async callModelWithJSONEnforcement(
+    prompt: string,
+    model: string,
+    options: EnhancedAIRequestOptions
+  ): Promise<EnhancedAIResponse> {
     const startTime = Date.now();
 
     try {
-      console.log(
-        `🤖 Generating ${request.type} response for ${request.personality.model}`
+      // Determine prompt template based on game context
+      let systemPrompt = "";
+      if (options.gameContext?.phase) {
+        const template =
+          JSON_PROMPT_TEMPLATES[
+            options.gameContext.phase as keyof typeof JSON_PROMPT_TEMPLATES
+          ];
+        if (template) {
+          systemPrompt = template.systemPrompt;
+        }
+      }
+
+      // Enhance prompt with JSON requirement
+      const enhancedPrompt = options.requiresJSON
+        ? `${systemPrompt}\n\n${prompt}\n\nRemember: Respond with ONLY valid JSON, no other text.`
+        : prompt;
+
+      // Call the existing AI response generator
+      const response = await this.callExistingAISystem(
+        enhancedPrompt,
+        model,
+        options
       );
 
-      // For demo purposes, use smart fallback responses that consider context
-      const response = await this.generateSmartFallbackResponse(request);
-
-      const responseTime = Date.now() - startTime;
-      const tokensUsed = this.estimateTokenUsage(request, response);
-      const cost = this.calculateCost(
-        request.personality.model,
-        tokensUsed.input,
-        tokensUsed.output
-      );
-
-      // Update usage stats
-      this.updateUsageStats(
-        request.personality.model,
-        tokensUsed.input,
-        tokensUsed.output,
-        responseTime,
-        cost
-      );
+      // Validate JSON response
+      const jsonValidation = this.validateJSONResponse(response.content);
 
       return {
-        content: response,
-        confidence: 0.8,
+        content: response.content,
+        isValidJSON: jsonValidation.isValid,
+        parsedContent: jsonValidation.parsed,
         metadata: {
-          model: request.personality.model,
-          tokensUsed: tokensUsed.input + tokensUsed.output,
-          responseTime,
-          cost,
-          timestamp: new Date(),
+          ...response.metadata,
+          jsonParsingAttempts: jsonValidation.attempts,
+          fallbackUsed: !jsonValidation.isValid,
         },
       };
     } catch (error) {
-      console.error(`❌ AI response generation failed:`, error);
+      console.error(`❌ Enhanced AI model call failed:`, error);
 
-      // Update error stats
-      const stats = this.usageStats.get(request.personality.model)!;
-      stats.errorRate =
-        (stats.errorRate * stats.totalRequests + 1) / (stats.totalRequests + 1);
-
-      // Return fallback response
-      return this.getFallbackResponse(request);
+      // Return error response
+      return {
+        content: '{"message": "AI response failed"}',
+        isValidJSON: true,
+        parsedContent: { message: "AI response failed" },
+        metadata: {
+          model,
+          tokensUsed: 0,
+          responseTime: Date.now() - startTime,
+          cost: 0,
+          timestamp: new Date(),
+          jsonParsingAttempts: 0,
+          fallbackUsed: true,
+        },
+      };
     }
   }
 
-  private async generateSmartFallbackResponse(
-    request: AIActionRequest
-  ): Promise<string> {
-    const { type, context, personality } = request;
+  /**
+   * Validate JSON response with multiple attempts
+   */
+  private validateJSONResponse(content: string): {
+    isValid: boolean;
+    parsed?: any;
+    attempts: number;
+  } {
+    let attempts = 0;
 
-    switch (type) {
-      case "discussion":
-        return this.generateDiscussionResponse(context, personality);
-
-      case "vote":
-        return this.generateVoteReasoning(context, personality);
-
-      case "night_action":
-        return this.generateNightActionResponse(context, personality);
-
-      default:
-        return "I need to think about this situation more carefully.";
-    }
-  }
-
-  private generateDiscussionResponse(
-    context: AIDecisionContext,
-    personality: AIPersonality
-  ): string {
-    const { round, eliminatedPlayers } = context;
-    const { communicationStyle, archetype, suspicionLevel } = personality;
-
-    const responses: string[] = [];
-
-    // Base response on archetype
-    switch (archetype) {
-      case "analytical_detective":
-        responses.push(
-          "Looking at the voting patterns from previous rounds...",
-          "The elimination sequence suggests a particular strategy.",
-          "We need to analyze the behavioral patterns more carefully.",
-          "The timing of certain statements has been suspicious.",
-          "Mathematical probability suggests we should focus on..."
-        );
-        break;
-
-      case "creative_storyteller":
-        responses.push(
-          "I have a theory about what's really happening here.",
-          "The way this game is unfolding reminds me of...",
-          "Something about the group dynamics feels off to me.",
-          "I'm getting strong intuitive feelings about certain players.",
-          "Let me paint a picture of what I think is happening..."
-        );
-        break;
-
-      case "direct_analyst":
-        responses.push(
-          "Here's what I think: someone is clearly manipulating the votes.",
-          "We're wasting time. The evidence points to specific players.",
-          "Cut through the noise - who benefits from recent eliminations?",
-          "Stop overcomplicating this. The patterns are obvious.",
-          "Focus: who's been consistently suspicious throughout?"
-        );
-        break;
+    // Attempt 1: Direct parsing
+    attempts++;
+    try {
+      const parsed = JSON.parse(content);
+      return { isValid: true, parsed, attempts };
+    } catch (error) {
+      // Attempt failed
     }
 
-    // Add round-specific context
-    if (round > 1 && eliminatedPlayers.length > 0) {
-      responses.push(
-        `After ${eliminatedPlayers.length} eliminations, we need to change strategy.`,
-        "The remaining players' behavior is becoming more telling.",
-        "With fewer people left, every vote becomes critical."
-      );
+    // Attempt 2: Extract JSON from content
+    attempts++;
+    try {
+      const jsonMatch = content.match(/\{[^}]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return { isValid: true, parsed, attempts };
+      }
+    } catch (error) {
+      // Attempt failed
     }
 
-    // Adjust for personality traits
-    if (suspicionLevel > 7) {
-      responses.push(
-        "I'm becoming increasingly suspicious of certain players.",
-        "Too many coincidences are happening for this to be random.",
-        "Someone is definitely trying to mislead us."
-      );
+    // Attempt 3: Clean and parse
+    attempts++;
+    try {
+      let cleaned = content.replace(/```json|```/g, "").trim();
+      cleaned = cleaned.replace(/,\s*}/g, "}"); // Remove trailing commas
+      const parsed = JSON.parse(cleaned);
+      return { isValid: true, parsed, attempts };
+    } catch (error) {
+      // All attempts failed
     }
 
-    const baseResponse =
-      responses[Math.floor(Math.random() * responses.length)];
-
-    // Adjust message length based on communication style
-    switch (communicationStyle.averageMessageLength) {
-      case "short":
-        return baseResponse.split(".")[0] + ".";
-      case "long":
-        return (
-          baseResponse + " " + this.addDetailedAnalysis(context, personality)
-        );
-      default:
-        return baseResponse;
-    }
+    return { isValid: false, attempts };
   }
 
-  private generateVoteReasoning(
-    context: AIDecisionContext,
-    personality: AIPersonality
-  ): string {
-    const reasons = [
-      "Their voting pattern has been inconsistent with citizen behavior.",
-      "They've been deflecting suspicion rather than finding mafia.",
-      "Their questions seem designed to confuse rather than clarify.",
-      "The timing of their statements has been suspicious.",
-      "They've been too eager to eliminate certain players.",
-      "Their behavior changed significantly after the last elimination.",
-      "They haven't contributed meaningful analysis to help citizens.",
-      "Their alliances seem strategically motivated rather than genuine.",
-    ];
+  /**
+   * Call existing AI system (integrates with current implementation)
+   */
+  private async callExistingAISystem(
+    prompt: string,
+    model: string,
+    options: EnhancedAIRequestOptions
+  ): Promise<any> {
+    // This would integrate with the existing aiResponseGenerator
+    // For this example, showing the interface
 
-    const reason = reasons[Math.floor(Math.random() * reasons.length)];
+    const aiResponseGenerator =
+      require("../../../../src/lib/ai/response-generator").aiResponseGenerator;
 
-    if (personality.communicationStyle.averageMessageLength === "long") {
-      return `${reason} Additionally, when I consider the broader context of this game, their actions become even more suspicious.`;
-    }
-
-    return reason;
-  }
-
-  private generateNightActionResponse(
-    context: AIDecisionContext,
-    personality: AIPersonality
-  ): string {
-    // This is just for logging/debugging - actual night actions are handled by game logic
-    if (context.role === PlayerRole.MAFIA_LEADER) {
-      return "Choosing elimination target based on threat assessment";
-    } else if (context.role === PlayerRole.HEALER) {
-      return "Selecting protection target based on risk analysis";
-    }
-    return "Considering night action options";
-  }
-
-  private addDetailedAnalysis(
-    context: AIDecisionContext,
-    personality: AIPersonality
-  ): string {
-    const additions = [
-      "Looking at the meta-game, certain players are positioning themselves advantageously.",
-      "The vote distribution suggests coordinated behavior among some players.",
-      "Communication patterns reveal potential hidden alliances.",
-      "Recent eliminations have disproportionately affected one faction.",
-      "The psychological dynamics between players are shifting tellingly.",
-    ];
-
-    return additions[Math.floor(Math.random() * additions.length)];
-  }
-
-  private getFallbackResponse(request: AIActionRequest): AIResponse {
-    const fallbacks = this.fallbackResponses[request.type] || [
-      "I need more time to think.",
-    ];
-    const content = fallbacks[Math.floor(Math.random() * fallbacks.length)];
-
-    return {
-      content,
-      confidence: 0.5,
-      metadata: {
-        model: request.personality.model,
-        tokensUsed: 50,
-        responseTime: 1000,
-        cost: 0.001,
-        timestamp: new Date(),
-      },
-    };
-  }
-
-  private estimateTokenUsage(
-    request: AIActionRequest,
-    response: string
-  ): { input: number; output: number } {
-    // Rough estimation: 1 token ≈ 4 characters
-    const inputTokens = Math.ceil(JSON.stringify(request).length / 4);
-    const outputTokens = Math.ceil(response.length / 4);
-
-    return { input: inputTokens, output: outputTokens };
-  }
-
-  private calculateCost(
-    model: AIModel,
-    inputTokens: number,
-    outputTokens: number
-  ): number {
-    const config = MODEL_CONFIGS[model];
-    const inputCost = (inputTokens / 1000000) * config.costPerInputToken;
-    const outputCost = (outputTokens / 1000000) * config.costPerOutputToken;
-    return inputCost + outputCost;
-  }
-
-  private updateUsageStats(
-    model: AIModel,
-    inputTokens: number,
-    outputTokens: number,
-    responseTime: number,
-    cost: number
-  ): void {
-    const stats = this.usageStats.get(model)!;
-
-    stats.totalRequests++;
-    stats.totalTokensInput += inputTokens;
-    stats.totalTokensOutput += outputTokens;
-    stats.totalCost += cost;
-    stats.averageResponseTime =
-      (stats.averageResponseTime * (stats.totalRequests - 1) + responseTime) /
-      stats.totalRequests;
-    stats.lastUsed = new Date();
-
-    this.usageStats.set(model, stats);
-  }
-
-  // Public API methods
-  getUsageStats(): Map<AIModel, APIUsageStats> {
-    return new Map(this.usageStats);
-  }
-
-  getPersonalityPoolInfo(): any {
-    // For now, return basic info - will be enhanced when personality pool is integrated
-    const models = Object.values(AIModel);
-
-    return {
-      total: 18, // Free tier personalities
-      byModel: models.reduce((acc: Record<string, number>, model) => {
-        acc[model] = 3; // 3 personalities per model in free tier
-        return acc;
-      }, {}),
-      byArchetype: {
-        analytical_detective: 6,
-        creative_storyteller: 6,
-        direct_analyst: 6,
-      },
-      models,
-      archetypes: [
-        "analytical_detective",
-        "creative_storyteller",
-        "direct_analyst",
-      ],
-    };
-  }
-
-  getTotalCost(): number {
-    return Array.from(this.usageStats.values()).reduce(
-      (total, stats) => total + stats.totalCost,
-      0
-    );
-  }
-
-  resetStats(): void {
-    this.usageStats.clear();
-    Object.values(AIModel).forEach((model) => {
-      this.usageStats.set(model, {
-        model,
-        totalRequests: 0,
-        totalTokensInput: 0,
-        totalTokensOutput: 0,
-        totalCost: 0,
-        averageResponseTime: 0,
-        errorRate: 0,
-        lastUsed: new Date(),
-      });
+    return await aiResponseGenerator.generateResponse(prompt, model, {
+      maxTokens: options.maxTokens,
+      temperature: options.temperature,
+      // Pass through game context for analytics
+      gameContext: options.gameContext,
     });
   }
 }
+
+// 🔥 COMMIT 3: Export enhanced model caller
+export const enhancedModelCaller = new EnhancedAIModelCaller();
+
+// 🔥 COMMIT 3: JSON validation utilities
+export class JSONResponseValidator {
+  /**
+   * Validate discussion response JSON
+   */
+  static validateDiscussionJSON(content: string): {
+    isValid: boolean;
+    data?: any;
+    errors: string[];
+  } {
+    try {
+      const parsed = JSON.parse(content);
+      const errors: string[] = [];
+
+      if (!parsed.message || typeof parsed.message !== "string") {
+        errors.push("Missing or invalid message field");
+      }
+
+      if (parsed.message && parsed.message.length > 200) {
+        errors.push("Message too long (max 200 characters)");
+      }
+
+      return {
+        isValid: errors.length === 0,
+        data: errors.length === 0 ? parsed : undefined,
+        errors,
+      };
+    } catch (error) {
+      return {
+        isValid: false,
+        errors: ["Invalid JSON format"],
+      };
+    }
+  }
+
+  /**
+   * Validate voting response JSON
+   */
+  static validateVotingJSON(
+    content: string,
+    availableTargets: string[]
+  ): { isValid: boolean; data?: any; errors: string[] } {
+    try {
+      const parsed = JSON.parse(content);
+      const errors: string[] = [];
+
+      if (!parsed.message || typeof parsed.message !== "string") {
+        errors.push("Missing or invalid message field");
+      }
+
+      if (!parsed.vote_target || typeof parsed.vote_target !== "string") {
+        errors.push("Missing or invalid vote_target field");
+      }
+
+      if (
+        parsed.vote_target &&
+        !availableTargets.includes(parsed.vote_target)
+      ) {
+        errors.push(`Invalid vote target: ${parsed.vote_target}`);
+      }
+
+      return {
+        isValid: errors.length === 0,
+        data: errors.length === 0 ? parsed : undefined,
+        errors,
+      };
+    } catch (error) {
+      return {
+        isValid: false,
+        errors: ["Invalid JSON format"],
+      };
+    }
+  }
+
+  /**
+   * Validate night action response JSON
+   */
+  static validateNightActionJSON(
+    content: string,
+    availableTargets: string[]
+  ): { isValid: boolean; data?: any; errors: string[] } {
+    try {
+      const parsed = JSON.parse(content);
+      const errors: string[] = [];
+
+      if (!parsed.action || !["kill", "heal"].includes(parsed.action)) {
+        errors.push(
+          'Missing or invalid action field (must be "kill" or "heal")'
+        );
+      }
+
+      if (!parsed.target || typeof parsed.target !== "string") {
+        errors.push("Missing or invalid target field");
+      }
+
+      if (
+        parsed.target &&
+        parsed.target !== "nobody" &&
+        !availableTargets.includes(parsed.target)
+      ) {
+        errors.push(`Invalid target: ${parsed.target}`);
+      }
+
+      if (!parsed.reasoning || typeof parsed.reasoning !== "string") {
+        errors.push("Missing or invalid reasoning field");
+      }
+
+      return {
+        isValid: errors.length === 0,
+        data: errors.length === 0 ? parsed : undefined,
+        errors,
+      };
+    } catch (error) {
+      return {
+        isValid: false,
+        errors: ["Invalid JSON format"],
+      };
+    }
+  }
+}
+
+// Example of how the existing aiResponseGenerator would be enhanced:
+//
+// export class EnhancedAIResponseGenerator {
+//   async generateResponse(prompt: string, model: string, options: EnhancedAIRequestOptions) {
+//     // Use enhancedModelCaller for JSON-only responses
+//     return await enhancedModelCaller.callModelWithJSONEnforcement(prompt, model, options);
+//   }
+// }

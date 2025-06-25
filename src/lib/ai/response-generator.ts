@@ -21,7 +21,22 @@ export class AIResponseGenerator {
   /**
    * Generate AI response for any game action
    */
-  async generateResponse(request: AIActionRequest): Promise<AIResponse> {
+  async generateResponse(
+    prompt: string,
+    model: AIModel,
+    p0: {
+      maxTokens: number;
+      temperature: number;
+      requiresJSON: boolean;
+      gameContext: {
+        phase: string;
+        round: number;
+        playerId: string;
+        personality: string;
+      };
+    },
+    request: AIActionRequest
+  ): Promise<AIResponse> {
     const cacheKey = this.generateCacheKey(request);
 
     // Check cache first
@@ -84,7 +99,24 @@ export class AIResponseGenerator {
       },
     };
 
-    return this.generateResponse(request);
+    // FIX: Use proper 4-parameter call
+    const prompt = `You are ${personality.name}. Generate a discussion response based on the current game context.`;
+    return this.generateResponse(
+      prompt,
+      personality.model,
+      {
+        maxTokens: this.getMessageLengthForPersonality(personality),
+        temperature: 0.8,
+        requiresJSON: false,
+        gameContext: {
+          phase: "discussion",
+          round: context.round,
+          playerId: context.playerId,
+          personality: personality.name,
+        },
+      },
+      request
+    );
   }
 
   /**
@@ -111,7 +143,28 @@ export class AIResponseGenerator {
       },
     };
 
-    const response = await this.generateResponse(request);
+    // FIX: Use proper 4-parameter call
+    const prompt = `You are ${
+      personality.name
+    }. Choose who to vote for elimination. Available targets: ${availableTargets.join(
+      ", "
+    )}`;
+    const response = await this.generateResponse(
+      prompt,
+      personality.model,
+      {
+        maxTokens: 200,
+        temperature: 0.7,
+        requiresJSON: true,
+        gameContext: {
+          phase: "voting",
+          round: context.round,
+          playerId: context.playerId,
+          personality: personality.name,
+        },
+      },
+      request
+    );
     return this.parseVotingResponseWithMultipleStrategies(
       response,
       availableTargets,
@@ -142,7 +195,28 @@ export class AIResponseGenerator {
       },
     };
 
-    const response = await this.generateResponse(request);
+    // FIX: Use proper 4-parameter call
+    const prompt = `You are ${
+      personality.name
+    }. Choose your night action. Available targets: ${availableTargets.join(
+      ", "
+    )}`;
+    const response = await this.generateResponse(
+      prompt,
+      personality.model,
+      {
+        maxTokens: 150,
+        temperature: 0.6,
+        requiresJSON: true,
+        gameContext: {
+          phase: "night",
+          round: context.round,
+          playerId: context.playerId,
+          personality: personality.name,
+        },
+      },
+      request
+    );
     return this.parseNightActionResponseWithFallback(
       response,
       context.role,
@@ -178,8 +252,24 @@ export class AIResponseGenerator {
       },
     };
 
-    // Add special mafia coordination context
-    const originalContent = await this.generateResponse(request);
+    // FIX: Use proper 4-parameter call
+    const prompt = `You are ${personality.name}, a mafia member coordinating with ${partnerPersonality.name}. Discuss strategy privately.`;
+    const originalContent = await this.generateResponse(
+      prompt,
+      personality.model,
+      {
+        maxTokens: 150,
+        temperature: 0.8,
+        requiresJSON: false,
+        gameContext: {
+          phase: "mafia_coordination",
+          round: context.round,
+          playerId: context.playerId,
+          personality: personality.name,
+        },
+      },
+      request
+    );
     return `[MAFIA CHAT] ${originalContent.content}`;
   }
 
@@ -211,7 +301,28 @@ export class AIResponseGenerator {
       },
     };
 
-    const response = await this.generateResponse(request);
+    // FIX: Use proper 4-parameter call
+    const prompt = `You are ${
+      personality.name
+    }, a healer thinking about who to protect. Available targets: ${availableTargets.join(
+      ", "
+    )}`;
+    const response = await this.generateResponse(
+      prompt,
+      personality.model,
+      {
+        maxTokens: 120,
+        temperature: 0.7,
+        requiresJSON: false,
+        gameContext: {
+          phase: "healer_reasoning",
+          round: context.round,
+          playerId: context.playerId,
+          personality: personality.name,
+        },
+      },
+      request
+    );
     return `[HEALER THOUGHTS] ${response.content}`;
   }
 

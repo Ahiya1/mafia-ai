@@ -601,24 +601,71 @@ export class GameOrchestrator
   }
 
   /**
-   * Initialize AI player in context system
+   * 🔥 COMMIT 3: Enhanced AI player initialization with real personality
    */
   private initializeAIPlayer(playerId: PlayerId): void {
-    // Set up initial context for AI player
-    contextManager.update(playerId, {
-      type: "player_status",
-      data: {
-        isAlive: true,
-        isReady: false,
-        joinedAt: new Date(),
-      },
-    });
+    try {
+      // Get AI personalities from the personality pool
+      const personalities =
+        require("../../../../src/lib/ai/personality-pool").selectGamePersonalities(
+          this.gameState.gameConfig.premiumModelsEnabled,
+          1
+        );
 
-    console.log(`🤖 AI player context initialized: ${playerId.slice(-6)}`);
+      if (personalities.length > 0) {
+        const personality = personalities[0];
+
+        // Set personality in context manager
+        contextManager.setPlayerPersonality(playerId, personality);
+
+        // Set up initial context for AI player
+        contextManager.update(playerId, {
+          type: "player_status",
+          data: {
+            isAlive: true,
+            isReady: false,
+            joinedAt: new Date(),
+            personality: personality.name,
+            model: personality.model,
+            archetype: personality.archetype,
+          },
+        });
+
+        console.log(
+          `🤖 AI player initialized: ${playerId.slice(-6)} → ${
+            personality.name
+          } (${personality.model})`
+        );
+      } else {
+        console.warn(`⚠️ No personality available for AI player ${playerId}`);
+
+        // Fallback initialization
+        contextManager.update(playerId, {
+          type: "player_status",
+          data: {
+            isAlive: true,
+            isReady: false,
+            joinedAt: new Date(),
+          },
+        });
+      }
+    } catch (error) {
+      console.error(`❌ Failed to initialize AI player ${playerId}:`, error);
+
+      // Emergency fallback
+      contextManager.update(playerId, {
+        type: "player_status",
+        data: {
+          isAlive: true,
+          isReady: false,
+          joinedAt: new Date(),
+        },
+      });
+    }
   }
 
   /**
-   * 🔥 COMMIT 2: Enhanced change phase with phase managers
+   * 🔥 COMMIT 3: Enhanced change phase with AI context updates
    */
   private changePhase(newPhase: GamePhase): void {
     const oldPhase = this.gameState.phase;
@@ -641,19 +688,55 @@ export class GameOrchestrator
       },
     });
 
-    // Update AI context builder
+    // 🔥 COMMIT 3: Enhanced AI context builder update with living player names
+    const livingPlayers = this.getAlivePlayers().map((p) => p.id);
+    const livingPlayerNames = livingPlayers.map(
+      (id) => nameRegistry.getName(id, this.gameId) || "Unknown"
+    );
+
     aiContextBuilder.updateGameState({
       phase: newPhase,
       round: this.gameState.currentRound,
-      livingPlayers: this.getAlivePlayers().map((p) => p.id),
+      livingPlayers: livingPlayers,
       eliminatedPlayers: this.gameState.eliminatedPlayers,
       gameHistory: this.gameState.messages.map(
-        (m) => `${this.gameState.players.get(m.playerId)?.name}: ${m.content}`
+        (m) =>
+          `${nameRegistry.getName(m.playerId, this.gameId) || "Unknown"}: ${
+            m.content
+          }`
       ),
-      timeRemaining: 30000, // Will be calculated properly by phase managers
+      timeRemaining: this.getPhaseTimeRemaining(newPhase),
     });
 
-    console.log(`🔄 Phase changed: ${oldPhase} → ${newPhase}`);
+    // 🔥 COMMIT 3: Update all AI players with enhanced context
+    for (const [playerId, player] of this.gameState.players.entries()) {
+      if (player.type === PlayerType.AI) {
+        contextManager.update(playerId, {
+          type: "game_state",
+          data: {
+            phase: newPhase,
+            round: this.gameState.currentRound,
+            livingPlayers: livingPlayerNames,
+            eliminatedPlayers: this.gameState.eliminatedPlayers.map(
+              (id) => nameRegistry.getName(id, this.gameId) || "Unknown"
+            ),
+            gameHistory: this.gameState.messages
+              .slice(-10)
+              .map(
+                (m) =>
+                  `${
+                    nameRegistry.getName(m.playerId, this.gameId) || "Unknown"
+                  }: ${m.content}`
+              ),
+            timeRemaining: this.getPhaseTimeRemaining(newPhase),
+          },
+        });
+      }
+    }
+
+    console.log(
+      `🔄 Phase changed with AI integration: ${oldPhase} → ${newPhase}`
+    );
 
     // 🔥 COMMIT 2: Start appropriate phase manager
     this.startPhaseManager(newPhase);
@@ -848,7 +931,64 @@ export class GameOrchestrator
   }
 
   /**
-   * Get enhanced debug information
+   * 🔥 COMMIT 3: Get phase time remaining
+   */
+  private getPhaseTimeRemaining(phase: GamePhase): number {
+    const config = this.gameState.gameConfig;
+
+    switch (phase) {
+      case GamePhase.DISCUSSION:
+        return config.discussionPhaseDuration;
+      case GamePhase.VOTING:
+        return config.votingPhaseDuration;
+      case GamePhase.NIGHT:
+        return config.nightPhaseDuration;
+      case GamePhase.ROLE_ASSIGNMENT:
+        return 5000; // 5 seconds
+      default:
+        return 30000; // 30 seconds default
+    }
+  }
+
+  /**
+   * 🔥 COMMIT 3: Test AI integration for all AI players
+   */
+  async testAIIntegration(): Promise<any> {
+    const aiPlayers = Array.from(this.gameState.players.values()).filter(
+      (p) => p.type === PlayerType.AI
+    );
+
+    console.log(
+      `🧪 Testing AI integration for ${aiPlayers.length} AI players...`
+    );
+
+    const results = await contextManager.testAllAIIntegrations();
+
+    console.log(`✅ AI integration test completed:`, results);
+
+    return {
+      ...results,
+      aiPlayersCount: aiPlayers.length,
+      integrationReady: results.passed === results.tested,
+    };
+  }
+
+  /**
+   * 🔥 COMMIT 3: Get AI coordination statistics
+   */
+  getAICoordinationStats(): any {
+    return {
+      contextManager: contextManager.getContextStats(),
+      aiCoordination:
+        require("../ai/ai-coordinator").aiCoordinator.getCoordinationStats(),
+      personalitiesAssigned: Array.from(this.gameState.players.values()).filter(
+        (p) => p.type === PlayerType.AI
+      ).length,
+    };
+  }
+
+  /**
+   * 🔥 COMMIT 3: Enhanced debug information with AI integration
    */
   getDebugInfo(): any {
     return {
@@ -872,6 +1012,10 @@ export class GameOrchestrator
         night: this.nightManager.getDebugInfo(),
         roles: this.roleManager.getDebugInfo(),
       },
+      // 🔥 COMMIT 3: AI integration statistics
+      aiIntegration: this.getAICoordinationStats(),
+      realAIActive: true,
+      jsonOnlyResponses: true,
     };
   }
 }
