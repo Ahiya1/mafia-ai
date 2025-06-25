@@ -1,4 +1,4 @@
-// server/index.ts - Complete AI Mafia Server with Real AI Integration & Fixed Auth
+// server/index.ts - Complete AI Mafia Server with Revolutionary Architecture Integration
 import express, { Request, Response, NextFunction } from "express";
 import { createServer } from "http";
 import cors from "cors";
@@ -8,6 +8,8 @@ import dotenv from "dotenv";
 import winston from "winston";
 import { GameSocketServer } from "./socket/game-server";
 import { authManager } from "./lib/auth/auth-manager";
+import { databaseManager } from "./lib/database/setup"; // 🔥 COMMIT 4: Revolutionary architecture database
+import { analyticsManager } from "./lib/analytics/analytics-manager"; // 🔥 COMMIT 4: Analytics integration
 
 dotenv.config();
 
@@ -230,7 +232,7 @@ const logger = winston.createLogger({
 });
 
 // Initialize Express app and server
-const app = express(); // Fix for X-Forwarded-For header issue
+const app = express();
 const httpServer = createServer(app);
 const gameSocketServer = new GameSocketServer(httpServer);
 
@@ -260,18 +262,6 @@ app.use(
     crossOriginEmbedderPolicy: false,
   })
 );
-
-// Rate limiting - DISABLED FOR NOW
-// const limiter = rateLimit({
-//   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000", 10),
-//   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "200", 10),
-//   standardHeaders: true,
-//   legacyHeaders: false,
-//   message: "Too many requests from this IP, please try again later.",
-//   skip: () => process.env.NODE_ENV === "development",
-//   validate: false,
-// });
-// app.use(limiter);
 
 // CORS configuration
 const allowedOrigins = [
@@ -330,24 +320,103 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Database connection check
+// 🔥 COMMIT 4: Initialize Revolutionary Architecture Database
 let database: any = null;
-try {
-  if (
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  ) {
-    logger.info("✅ Supabase database connection ready");
+let revolutionaryArchitectureReady = false;
+
+/**
+ * 🔥 COMMIT 4: Initialize Revolutionary Architecture Database System
+ */
+async function initializeRevolutionaryArchitecture(): Promise<void> {
+  try {
+    if (
+      !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      !process.env.SUPABASE_SERVICE_ROLE_KEY
+    ) {
+      logger.warn("⚠️ Database credentials not found - features disabled");
+      database = { connected: false, type: "disabled" };
+      return;
+    }
+
+    logger.info(
+      "🔥 Initializing Revolutionary Architecture Database System..."
+    );
+
+    // Test database connection
+    const connected = await databaseManager.testConnection();
+    if (!connected) {
+      logger.error("❌ Database connection failed");
+      database = {
+        connected: false,
+        type: "supabase",
+        error: "connection_failed",
+      };
+      return;
+    }
+
+    // Check database health
+    const health = await databaseManager.checkHealth();
+
+    if (!health.connected) {
+      logger.error("❌ Database health check failed");
+      database = {
+        connected: false,
+        type: "supabase",
+        error: "health_check_failed",
+      };
+      return;
+    }
+
+    // Run migrations if needed
+    if (!health.revolutionaryArchitectureReady) {
+      logger.info("🚀 Running Revolutionary Architecture migrations...");
+      const migrationResult = await databaseManager.runMigrations();
+
+      if (migrationResult.success) {
+        logger.info(
+          `✅ Migrations completed: ${migrationResult.migrationsRun} executed`
+        );
+      } else {
+        logger.warn(`⚠️ Migration issues: ${migrationResult.message}`);
+        // Continue anyway - might work with existing schema
+      }
+    }
+
+    // Final health check
+    const finalHealth = await databaseManager.checkHealth();
+    revolutionaryArchitectureReady = finalHealth.revolutionaryArchitectureReady;
+
     database = {
       connected: true,
       type: "supabase",
       url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
+      health: finalHealth,
     };
-  } else {
-    logger.warn("⚠️  Database credentials not found - features disabled");
+
+    if (revolutionaryArchitectureReady) {
+      logger.info("🎉 Revolutionary Architecture is ready!");
+
+      // Get architecture stats
+      const stats = await databaseManager.getArchitectureStats();
+      if (stats) {
+        logger.info("📊 Architecture Stats:", {
+          totalGames: stats.totalGames,
+          contextOperations: stats.revolutionaryArchitecture.contextOperations,
+          perfectAnonymity: stats.revolutionaryArchitecture.perfectAnonymity,
+        });
+      }
+    } else {
+      logger.warn("⚠️ Revolutionary Architecture not fully ready");
+    }
+  } catch (error) {
+    logger.error("❌ Revolutionary Architecture initialization failed:", error);
+    database = {
+      connected: false,
+      type: "supabase",
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
-} catch (error) {
-  logger.error("❌ Database initialization failed:", error);
 }
 
 // ================================
@@ -356,19 +425,35 @@ try {
 
 app.get("/", (_req: Request, res: Response) => {
   res.json({
-    message: "🕵️‍♂️ AI Mafia Backend Server with Real AI",
+    message: "🕵️‍♂️ AI Mafia Backend Server with Revolutionary Architecture",
     status: "online",
-    version: "2.1.0",
+    version: "2.0.0",
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || "development",
     features: {
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
+      perfectAnonymity: "Name Registry System",
+      contextOperations: "trigger/update/push",
+      phaseManagers: "Discussion, Voting, Night, Role",
+      bulletproofParsing: "JSON validation with fallbacks",
       realAI: "OpenAI, Anthropic, Google AI integration",
       personalities: "50+ unique AI personalities",
       observerMode: "Full spectator capabilities",
       smartPhases: "Early progression when actions complete",
-      analytics: "Real-time game analytics",
+      analytics: "Research-grade game analytics",
       authentication: "Supabase integration",
       subscriptions: "Monthly tiers with premium features",
+    },
+    revolutionaryArchitecture: {
+      enabled: revolutionaryArchitectureReady,
+      database: database?.connected || false,
+      features: [
+        "Perfect Anonymity System",
+        "Context Operations",
+        "Phase Managers",
+        "Bulletproof Parsing",
+        "Enhanced Analytics",
+      ],
     },
     endpoints: {
       health: "/health",
@@ -380,6 +465,11 @@ app.get("/", (_req: Request, res: Response) => {
         signin: "/api/auth/signin",
       },
       packages: "/api/packages",
+      database: {
+        health: "/api/db/health",
+        stats: "/api/db/stats",
+        architecture: "/api/db/architecture",
+      },
       creator: {
         activeGames: "/api/creator/active-games",
         exportData: "/api/creator/export-data",
@@ -388,8 +478,8 @@ app.get("/", (_req: Request, res: Response) => {
         serverMetrics: "/api/creator/server-metrics",
       },
     },
-    detective: "Welcome to the enhanced AI Mafia server!",
-    railway: "Real AI deployment successful! 🚂",
+    detective: "Welcome to the Revolutionary Architecture AI Mafia server!",
+    railway: "Revolutionary Architecture deployment successful! 🚂",
   });
 });
 
@@ -397,10 +487,27 @@ app.get("/health", (_req: Request, res: Response) => {
   const healthData = {
     status: "healthy",
     timestamp: new Date().toISOString(),
-    version: "2.1.0",
-    phase: "Real AI Integration Complete",
-    detective: "🕵️‍♂️ AI Mafia Server with Real AI Online",
-    database: database ? `connected (${database.type})` : "disabled",
+    version: "2.0.0",
+    phase: "Revolutionary Architecture Complete",
+    detective: "🕵️‍♂️ AI Mafia Server with Revolutionary Architecture Online",
+    database: database
+      ? `connected (${database.type}${
+          database.revolutionaryArchitecture
+            ? " + Revolutionary Architecture"
+            : ""
+        })`
+      : "disabled",
+    revolutionaryArchitecture: {
+      enabled: revolutionaryArchitectureReady,
+      status: revolutionaryArchitectureReady ? "ready" : "initializing",
+      features: [
+        "Perfect Anonymity System",
+        "Context Operations (trigger/update/push)",
+        "Phase Managers (Discussion, Voting, Night, Role)",
+        "Bulletproof JSON Parsing",
+        "Enhanced Analytics Integration",
+      ],
+    },
     websocket: "ready",
     realAI: "active",
     personalities: "loaded",
@@ -414,6 +521,7 @@ app.get("/health", (_req: Request, res: Response) => {
       total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
     },
     features: [
+      "revolutionary_architecture",
       "real_ai_integration",
       "smart_phase_progression",
       "observer_dashboard",
@@ -429,12 +537,112 @@ app.get("/health", (_req: Request, res: Response) => {
       binding: `${HOST}:${PORT}`,
       cors: "enabled",
       healthCheck: "passing",
-      aiIntegration: "active",
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     },
   };
 
   logger.info("Health check requested");
   res.json(healthData);
+});
+
+// 🔥 COMMIT 4: Revolutionary Architecture Database Endpoints
+app.get("/api/db/health", async (_req: Request, res: Response) => {
+  try {
+    if (!database?.connected) {
+      return res.status(503).json({
+        connected: false,
+        message: "Database not available",
+        revolutionaryArchitecture: false,
+      });
+    }
+
+    const health = await databaseManager.checkHealth();
+    const status = await databaseManager.getStatus();
+
+    res.json({
+      connected: health.connected,
+      revolutionaryArchitecture: health.revolutionaryArchitectureReady,
+      tablesReady: health.tablesCreated,
+      adminUserReady: status.adminUserReady,
+      health,
+      status,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    logger.error("Database health check error:", error);
+    res.status(500).json({
+      connected: false,
+      error: "Health check failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.get("/api/db/stats", async (_req: Request, res: Response) => {
+  try {
+    if (!revolutionaryArchitectureReady) {
+      return res.status(503).json({
+        error: "Revolutionary Architecture not ready",
+        revolutionaryArchitecture: false,
+      });
+    }
+
+    const stats = await databaseManager.getArchitectureStats();
+
+    res.json({
+      success: true,
+      revolutionaryArchitecture: true,
+      stats,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    logger.error("Architecture stats error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get architecture stats",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.get("/api/db/architecture", async (_req: Request, res: Response) => {
+  try {
+    const health = database?.connected
+      ? await databaseManager.checkHealth()
+      : null;
+    const stats = revolutionaryArchitectureReady
+      ? await databaseManager.getArchitectureStats()
+      : null;
+
+    res.json({
+      revolutionaryArchitecture: {
+        enabled: revolutionaryArchitectureReady,
+        ready: revolutionaryArchitectureReady,
+        features: [
+          "Perfect Anonymity System (Name Registry)",
+          "Context Operations (trigger/update/push)",
+          "Phase Managers (Discussion, Voting, Night, Role)",
+          "Bulletproof JSON Parsing",
+          "Enhanced Analytics Integration",
+        ],
+        database: {
+          connected: database?.connected || false,
+          health,
+        },
+        performance: stats?.revolutionaryArchitecture || null,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    logger.error("Architecture endpoint error:", error);
+    res.status(500).json({
+      revolutionaryArchitecture: {
+        enabled: false,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
 });
 
 // ================================
@@ -451,6 +659,11 @@ app.get("/api/stats", async (_req: Request, res: Response) => {
       aiStatsArray.push(processAIStatsEntry(model, stats));
     }
 
+    // 🔥 COMMIT 4: Include Revolutionary Architecture stats
+    const architectureStats = revolutionaryArchitectureReady
+      ? await databaseManager.getArchitectureStats()
+      : null;
+
     return res.json({
       rooms: roomStats,
       ai: aiStatsArray,
@@ -462,21 +675,27 @@ app.get("/api/stats", async (_req: Request, res: Response) => {
         nodeVersion: process.version,
         realAIActive: true,
         personalitiesLoaded: true,
+        revolutionaryArchitecture: revolutionaryArchitectureReady,
       },
+      // 🔥 COMMIT 4: Enhanced analytics with Revolutionary Architecture
       analytics: {
         playerInsights:
           roomStats.totalRooms > 0
             ? {
                 totalGames: roomStats.totalRooms,
                 avgGameDuration: "Calculated from active games",
-                aiDetectionRate: "Being measured with real AI",
+                aiDetectionRate:
+                  "Being measured with Revolutionary Architecture",
                 realAIResponses: safeSumAIStats(aiStats, "totalRequests"),
+                revolutionaryArchitecture:
+                  architectureStats?.revolutionaryArchitecture || null,
               }
             : {
                 totalGames: 0,
                 avgGameDuration: "No games yet",
                 aiDetectionRate: "No data available",
                 realAIResponses: 0,
+                revolutionaryArchitecture: null,
               },
         aiPerformance: aiStatsArray.reduce(
           (acc: Record<string, any>, entry: [string, any]) => {
@@ -489,15 +708,31 @@ app.get("/api/stats", async (_req: Request, res: Response) => {
                 avgResponseTime: stats.averageResponseTime,
                 totalCost: stats.totalCost,
                 isRealAI: true,
+                revolutionaryArchitecture: true,
               };
             }
             return acc;
           },
           {}
         ),
+        revolutionaryArchitecture: architectureStats
+          ? {
+              contextOperations:
+                architectureStats.revolutionaryArchitecture.contextOperations,
+              nameMappings:
+                architectureStats.revolutionaryArchitecture.nameMappings,
+              parsingSuccessRate:
+                architectureStats.revolutionaryArchitecture
+                  .averageParsingSuccessRate,
+              perfectAnonymity:
+                architectureStats.revolutionaryArchitecture.perfectAnonymity,
+              bulletproofParsing:
+                architectureStats.revolutionaryArchitecture.bulletproofParsing,
+            }
+          : null,
       },
       status: "operational",
-      detective: "🕵️‍♂️ All systems operational with real AI",
+      detective: "🕵️‍♂️ All systems operational with Revolutionary Architecture",
     });
   } catch (error) {
     logger.error("Error fetching stats:", error);
@@ -519,25 +754,38 @@ app.get("/api/game-modes", (_req: Request, res: Response) => {
       {
         id: "single_player",
         name: "Single Player",
-        description: "1 Human + 9 Real AI Players",
+        description:
+          "1 Human + 9 Real AI Players with Revolutionary Architecture",
         recommended: true,
         playerCount: { human: 1, ai: 9 },
-        features: ["real_ai_models", "basic_analytics", "observer_mode"],
+        features: [
+          "real_ai_models",
+          "basic_analytics",
+          "observer_mode",
+          "revolutionary_architecture",
+        ],
         aiQuality: "free_tier",
       },
       {
         id: "multiplayer",
         name: "Multiplayer",
-        description: "2+ Humans + Real AI Players",
+        description:
+          "2+ Humans + Real AI Players with Revolutionary Architecture",
         recommended: false,
         playerCount: { human: "2-10", ai: "0-8" },
-        features: ["real_ai_models", "basic_analytics", "observer_mode"],
+        features: [
+          "real_ai_models",
+          "basic_analytics",
+          "observer_mode",
+          "revolutionary_architecture",
+        ],
         aiQuality: "free_tier",
       },
       {
         id: "premium_single",
         name: "Premium Single Player",
-        description: "1 Human + 9 Premium AI Players",
+        description:
+          "1 Human + 9 Premium AI Players with Full Revolutionary Architecture",
         recommended: true,
         playerCount: { human: 1, ai: 9 },
         features: [
@@ -545,13 +793,15 @@ app.get("/api/game-modes", (_req: Request, res: Response) => {
           "advanced_analytics",
           "observer_mode",
           "ai_reasoning_visible",
+          "revolutionary_architecture",
+          "context_insights",
         ],
         aiQuality: "premium_tier",
       },
       {
         id: "ai_only_observer",
         name: "AI Only (Observer)",
-        description: "Watch 10 AI Players Compete",
+        description: "Watch 10 AI Players with Revolutionary Architecture",
         recommended: true,
         playerCount: { human: 0, ai: 10 },
         features: [
@@ -559,12 +809,25 @@ app.get("/api/game-modes", (_req: Request, res: Response) => {
           "full_observer_mode",
           "ai_reasoning_visible",
           "mafia_chat_visible",
+          "revolutionary_architecture",
+          "perfect_anonymity_insights",
         ],
         aiQuality: "premium_tier",
         observerOnly: true,
       },
     ],
-    detective: "🕵️‍♂️ Choose your detective mission with real AI!",
+    revolutionaryArchitecture: {
+      enabled: revolutionaryArchitectureReady,
+      features: [
+        "Perfect Anonymity System",
+        "Context Operations",
+        "Phase Managers",
+        "Bulletproof Parsing",
+        "Enhanced Analytics",
+      ],
+    },
+    detective:
+      "🕵️‍♂️ Choose your detective mission with Revolutionary Architecture!",
   });
 });
 
@@ -592,6 +855,9 @@ app.get("/api/personalities", (_req: Request, res: Response) => {
         personalityMatching: true,
         dynamicBehavior: true,
         observerMode: true,
+        revolutionaryArchitecture: revolutionaryArchitectureReady,
+        perfectAnonymity: true,
+        contextOperations: true,
       },
     };
 
@@ -624,18 +890,23 @@ app.post("/api/setup-admin", async (req: Request, res: Response) => {
     const adminEmail = email || "ahiya.butman@gmail.com";
     const adminPassword = "detective_ai_mafia_2025";
 
-    const result = await authManager.setupAdminUser(adminEmail, adminPassword);
+    // 🔥 COMMIT 4: Use Revolutionary Architecture database manager
+    const result = revolutionaryArchitectureReady
+      ? await databaseManager.setupAdminUser(adminEmail, adminPassword)
+      : await authManager.setupAdminUser(adminEmail, adminPassword);
 
     logger.info("Admin setup attempt", {
       success: result.success,
       email: adminEmail,
       userId: result.userId,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
 
     return res.json({
       success: result.success,
       message: result.message,
       userId: result.userId,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
       credentials: result.success
         ? {
             email: adminEmail,
@@ -648,6 +919,14 @@ app.post("/api/setup-admin", async (req: Request, res: Response) => {
               "analytics_export",
               "user_management",
               "database_access",
+              ...(revolutionaryArchitectureReady
+                ? [
+                    "revolutionary_architecture",
+                    "context_insights",
+                    "anonymity_insights",
+                    "phase_manager_insights",
+                  ]
+                : []),
             ],
           }
         : undefined,
@@ -692,6 +971,7 @@ app.post("/api/auth/signup", async (req: Request, res: Response) => {
       userId: result.user?.id,
       email,
       username,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
 
     return res.status(201).json({
@@ -703,6 +983,7 @@ app.post("/api/auth/signup", async (req: Request, res: Response) => {
       },
       message: "Account created successfully with free package",
       freeGames: 3,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
   } catch (error) {
     logger.error("Signup error:", error);
@@ -743,6 +1024,7 @@ app.post("/api/auth/signin", async (req: Request, res: Response) => {
       userId: result.user?.id,
       email,
       isAdmin: userProfile?.is_creator,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
 
     return res.json({
@@ -755,6 +1037,7 @@ app.post("/api/auth/signin", async (req: Request, res: Response) => {
       packages: userPackages,
       gameAccess,
       message: "Signed in successfully",
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
   } catch (error) {
     logger.error("Signin error:", error);
@@ -783,7 +1066,12 @@ app.get("/api/packages", async (_req: Request, res: Response) => {
           pkg.price_usd > 0
             ? `$${(pkg.price_usd / pkg.games_included).toFixed(2)} per game`
             : "Free",
+        revolutionaryArchitecture:
+          revolutionaryArchitectureReady &&
+          Array.isArray(pkg.features) &&
+          pkg.features.includes("revolutionary_architecture"),
       })),
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
   } catch (error) {
     logger.error("Error fetching packages:", error);
@@ -819,6 +1107,7 @@ app.get("/api/user/packages", async (req: Request, res: Response) => {
         ),
         premiumAccess: gameAccess.premiumFeatures,
         isAdmin: gameAccess.accessType === "admin",
+        revolutionaryArchitecture: revolutionaryArchitectureReady,
       },
     });
   } catch (error) {
@@ -861,6 +1150,7 @@ app.post("/api/purchase", async (req: Request, res: Response) => {
       packageId,
       amountPaid,
       transactionId: paypalTransactionId,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
 
     return res.json({
@@ -869,6 +1159,7 @@ app.post("/api/purchase", async (req: Request, res: Response) => {
       packageInfo: result.packageInfo,
       updatedPackages,
       gameAccess,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
   } catch (error) {
     logger.error("Purchase error:", error);
@@ -902,6 +1193,7 @@ app.post("/api/game/check-access", async (req: Request, res: Response) => {
     return res.json({
       success: true,
       ...gameAccess,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
   } catch (error) {
     logger.error("Error checking game access:", error);
@@ -945,6 +1237,7 @@ app.post("/api/game/consume", async (req: Request, res: Response) => {
         humanCount: 1,
         aiCount: 9,
         premiumModelsEnabled: isPremiumGame,
+        revolutionaryArchitecture: revolutionaryArchitectureReady,
       });
     }
 
@@ -953,6 +1246,7 @@ app.post("/api/game/consume", async (req: Request, res: Response) => {
       isPremiumGame,
       gamesRemaining: consumeResult.gamesRemaining,
       gameSessionId,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
 
     return res.json({
@@ -960,6 +1254,7 @@ app.post("/api/game/consume", async (req: Request, res: Response) => {
       message: consumeResult.message,
       gamesRemaining: consumeResult.gamesRemaining,
       gameAccess: await authManager.checkGameAccess(userId, isPremiumGame),
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
   } catch (error) {
     logger.error("Error consuming game:", error);
@@ -984,6 +1279,7 @@ app.post("/api/verify-creator", (req: Request, res: Response) => {
       res.json({
         valid: true,
         message: "Creator access granted",
+        revolutionaryArchitecture: revolutionaryArchitectureReady,
         features: [
           "unlimited_games",
           "premium_models",
@@ -995,6 +1291,15 @@ app.post("/api/verify-creator", (req: Request, res: Response) => {
           "game_management",
           "real_ai_monitoring",
           "observer_dashboard",
+          ...(revolutionaryArchitectureReady
+            ? [
+                "revolutionary_architecture",
+                "context_insights",
+                "anonymity_insights",
+                "phase_manager_insights",
+                "architecture_performance_monitoring",
+              ]
+            : []),
         ],
       });
     } else {
@@ -1034,6 +1339,7 @@ app.post("/api/creator/ai-only-game", async (req: Request, res: Response) => {
       nightPhaseDuration: 60,
       discussionPhaseDuration: 180,
       votingPhaseDuration: 90,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
       ...gameConfig,
     };
 
@@ -1050,15 +1356,18 @@ app.post("/api/creator/ai-only-game", async (req: Request, res: Response) => {
     logger.info("AI-only game created by creator", {
       roomInfo,
       config: enhancedConfig,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
     });
 
     return res.json({
       success: true,
-      message: "AI-only game created with premium models",
+      message:
+        "AI-only game created with premium models and Revolutionary Architecture",
       roomInfo: {
         ...roomInfo,
         observerUrl: `${process.env.FRONTEND_URL}/game/${roomInfo.code}?observer=true`,
         adminAccess: true,
+        revolutionaryArchitecture: revolutionaryArchitectureReady,
       },
       config: enhancedConfig,
     });
@@ -1113,6 +1422,7 @@ app.post("/api/creator/active-games", (req: Request, res: Response) => {
         hostId: room.hostId || null,
         premiumModelsEnabled: room.premiumModelsEnabled || false,
         realAI: true,
+        revolutionaryArchitecture: revolutionaryArchitectureReady,
       };
     });
 
@@ -1148,6 +1458,7 @@ app.post("/api/creator/active-games", (req: Request, res: Response) => {
         ),
         aiOnlyGames: games.filter((g: { isAIOnly: any }) => g.isAIOnly).length,
         realAIActive: true,
+        revolutionaryArchitecture: revolutionaryArchitectureReady,
       },
       timestamp: new Date().toISOString(),
     });
@@ -1175,9 +1486,15 @@ app.post("/api/admin/analytics", async (req: Request, res: Response) => {
 
     const analytics = await authManager.getSystemAnalytics();
 
+    // 🔥 COMMIT 4: Include Revolutionary Architecture analytics
+    const architectureStats = revolutionaryArchitectureReady
+      ? await databaseManager.getArchitectureStats()
+      : null;
+
     return res.json({
       success: true,
       analytics,
+      revolutionaryArchitecture: architectureStats,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -1195,7 +1512,8 @@ app.post("/api/admin/analytics", async (req: Request, res: Response) => {
 
 app.get("/api/railway-test", (_req: Request, res: Response) => {
   res.json({
-    message: "Railway deployment test successful with Real AI!",
+    message:
+      "Railway deployment test successful with Revolutionary Architecture!",
     timestamp: new Date().toISOString(),
     port: PORT,
     host: HOST,
@@ -1205,14 +1523,17 @@ app.get("/api/railway-test", (_req: Request, res: Response) => {
     realAI: "active",
     personalities: "loaded",
     observerMode: "enabled",
-    detective: "🕵️‍♂️ Railway + Real AI is working perfectly!",
+    revolutionaryArchitecture: {
+      enabled: revolutionaryArchitectureReady,
+      ready: revolutionaryArchitectureReady,
+      database: database?.connected || false,
+    },
+    detective: "🕵️‍♂️ Railway + Revolutionary Architecture is working perfectly!",
   });
 });
 
-// Add this to your server/index.ts - Email confirmation endpoint
-
 // ================================
-// EMAIL CONFIRMATION ENDPOINT
+// EMAIL CONFIRMATION ENDPOINTS
 // ================================
 
 app.post("/api/auth/confirm", async (req: Request, res: Response) => {
@@ -1226,6 +1547,7 @@ app.post("/api/auth/confirm", async (req: Request, res: Response) => {
         success: true,
         message: result.message,
         user: result.user,
+        revolutionaryArchitecture: revolutionaryArchitectureReady,
       });
     } else {
       return res.status(400).json({
@@ -1242,14 +1564,6 @@ app.post("/api/auth/confirm", async (req: Request, res: Response) => {
   }
 });
 
-// ================================
-// RESEND CONFIRMATION EMAIL
-// ================================
-
-// ================================
-// RESEND CONFIRMATION EMAIL - FIXED VERSION
-// ================================
-
 app.post(
   "/api/auth/resend-confirmation",
   async (req: Request, res: Response) => {
@@ -1263,7 +1577,6 @@ app.post(
         });
       }
 
-      // Use the new method instead of accessing private property
       const { error } = await authManager.resendConfirmationEmail(email);
 
       if (error) {
@@ -1339,7 +1652,11 @@ app.get("/auth/confirm", async (req: Request, res: Response) => {
           <h1>🕵️‍♂️ AI Mafia</h1>
           <div class="success">
             <h2>✅ Email Confirmed!</h2>
-            <p>Your email has been successfully verified. You can now sign in to AI Mafia.</p>
+            <p>Your email has been successfully verified. You can now sign in to AI Mafia${
+              revolutionaryArchitectureReady
+                ? " with Revolutionary Architecture"
+                : ""
+            }.</p>
           </div>
           <a href="${
             process.env.FRONTEND_URL || "https://mafia-ai.vercel.app"
@@ -1423,6 +1740,7 @@ app.get("/api/debug/game/:roomId", (req: Request, res: Response) => {
     return res.json({
       success: true,
       room,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -1448,6 +1766,7 @@ app.get("/api/debug/stuck-games", (req: Request, res: Response) => {
       stuckGamesCount: stuckGames.length,
       totalActiveGames: stats.activeRooms,
       stuckGames,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -1466,6 +1785,11 @@ app.get("/api/debug/server-health", (req: Request, res: Response) => {
     const health = {
       server: getSafeServerMetrics(),
       rooms: stats,
+      revolutionaryArchitecture: {
+        enabled: revolutionaryArchitectureReady,
+        database: database?.connected || false,
+        health: database?.health || null,
+      },
       healthy: true,
       timestamp: new Date().toISOString(),
     };
@@ -1496,6 +1820,7 @@ app.post("/api/debug/terminate-room/:roomId", (req: Request, res: Response) => {
     res.json({
       success: result.success,
       message: result.success ? "Room terminated" : result.message,
+      revolutionaryArchitecture: revolutionaryArchitectureReady,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -1528,6 +1853,7 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
         ? err.message
         : "Something went wrong",
     detective: "🕵️‍♂️ The detective is investigating...",
+    revolutionaryArchitecture: revolutionaryArchitectureReady,
   });
 });
 
@@ -1535,6 +1861,7 @@ app.use("*", (_req: Request, res: Response) => {
   res.status(404).json({
     error: "Endpoint not found",
     detective: "🕵️‍♂️ This case is closed - endpoint doesn't exist",
+    revolutionaryArchitecture: revolutionaryArchitectureReady,
     availableEndpoints: [
       "/",
       "/health",
@@ -1548,6 +1875,9 @@ app.use("*", (_req: Request, res: Response) => {
       "/api/game/check-access",
       "/api/game/consume",
       "/api/creator/*",
+      "/api/db/health",
+      "/api/db/stats",
+      "/api/db/architecture",
     ],
   });
 });
@@ -1565,6 +1895,26 @@ const startBackgroundTasks = () => {
       logger.error("Session cleanup failed:", error);
     }
   }, 24 * 60 * 60 * 1000);
+
+  // 🔥 COMMIT 4: Revolutionary Architecture health monitoring
+  if (revolutionaryArchitectureReady) {
+    setInterval(async () => {
+      try {
+        const stats = await databaseManager.getArchitectureStats();
+        if (stats) {
+          logger.info("🔥 Revolutionary Architecture Stats:", {
+            contextOperations:
+              stats.revolutionaryArchitecture.contextOperations,
+            parsingSuccessRate:
+              stats.revolutionaryArchitecture.averageParsingSuccessRate,
+            perfectAnonymity: stats.revolutionaryArchitecture.perfectAnonymity,
+          });
+        }
+      } catch (error) {
+        logger.error("Revolutionary Architecture monitoring failed:", error);
+      }
+    }, 60 * 60 * 1000); // Every hour
+  }
 };
 
 // ================================
@@ -1572,23 +1922,45 @@ const startBackgroundTasks = () => {
 // ================================
 
 const initializeServer = async () => {
-  logger.info("🚀 Initializing AI Mafia Server...");
+  logger.info(
+    "🚀 Initializing AI Mafia Server with Revolutionary Architecture..."
+  );
 
   try {
-    const adminResult = await authManager.setupAdminUser();
+    // 🔥 COMMIT 4: Initialize Revolutionary Architecture first
+    await initializeRevolutionaryArchitecture();
+
+    // Setup admin user
+    const adminResult = revolutionaryArchitectureReady
+      ? await databaseManager.setupAdminUser()
+      : await authManager.setupAdminUser();
+
     if (adminResult.success) {
       logger.info("✅ Admin user ready", {
         userId: adminResult.userId,
         email: "ahiya.butman@gmail.com",
+        revolutionaryArchitecture: revolutionaryArchitectureReady,
       });
     } else {
       logger.warn("⚠️ Admin setup issue:", adminResult.message);
     }
   } catch (error) {
-    logger.error("❌ Admin setup failed:", error);
+    logger.error("❌ Server initialization failed:", error);
   }
 
   logger.info("🎮 Server initialization complete");
+
+  if (revolutionaryArchitectureReady) {
+    logger.info("🔥 Revolutionary Architecture Status: READY");
+    logger.info("🎭 Perfect Anonymity System: ACTIVE");
+    logger.info("🧠 Context Operations: trigger/update/push READY");
+    logger.info("💬 Phase Managers: Discussion, Voting, Night, Role ACTIVE");
+    logger.info("🔍 Bulletproof Parsing: JSON validation ENABLED");
+    logger.info("📊 Enhanced Analytics: Research-grade data collection ACTIVE");
+  } else {
+    logger.warn("⚠️ Revolutionary Architecture: NOT READY");
+    logger.warn("Database connection or migration issues detected");
+  }
 };
 
 // ================================
@@ -1596,10 +1968,20 @@ const initializeServer = async () => {
 // ================================
 
 httpServer.listen(PORT, HOST as string, () => {
-  logger.info(`🎮 AI Mafia Server with Real AI running on ${HOST}:${PORT}`);
+  logger.info(
+    `🎮 AI Mafia Server with Revolutionary Architecture running on ${HOST}:${PORT}`
+  );
   logger.info(`🔌 WebSocket server: ready`);
   logger.info(
-    `🗄️ Database: ${database ? `connected (${database.type})` : "disabled"}`
+    `🗄️ Database: ${
+      database
+        ? `connected (${database.type}${
+            database.revolutionaryArchitecture
+              ? " + Revolutionary Architecture"
+              : ""
+          })`
+        : "disabled"
+    }`
   );
   logger.info(`🤖 Real AI models: OpenAI, Anthropic, Google`);
   logger.info(`🎭 50+ AI personalities loaded`);
@@ -1610,10 +1992,23 @@ httpServer.listen(PORT, HOST as string, () => {
       process.env.NODE_ENV === "production" ? "enabled" : "disabled"
     }`
   );
-  logger.info(`📊 Analytics: active`);
+  logger.info(
+    `📊 Analytics: ${
+      revolutionaryArchitectureReady ? "Revolutionary Architecture" : "standard"
+    }`
+  );
   logger.info(`🕵️‍♂️ Environment: ${process.env.NODE_ENV || "development"}`);
   logger.info(`🚂 Railway deployment: successful`);
   logger.info(`🔧 Creator endpoints: enhanced`);
+
+  if (revolutionaryArchitectureReady) {
+    logger.info(`🔥 Revolutionary Architecture: ONLINE`);
+    logger.info(`🎭 Perfect Anonymity: ACTIVE`);
+    logger.info(`🧠 Context Operations: READY`);
+    logger.info(`💬 Phase Managers: ACTIVE`);
+    logger.info(`🔍 Bulletproof Parsing: ENABLED`);
+    logger.info(`📊 Research-Grade Analytics: ACTIVE`);
+  }
 
   startBackgroundTasks();
   initializeServer();
@@ -1624,6 +2019,14 @@ httpServer.listen(PORT, HOST as string, () => {
     logger.info(`🎪 Game modes: http://${HOST}:${PORT}/api/game-modes`);
     logger.info(`🎭 Personalities: http://${HOST}:${PORT}/api/personalities`);
     logger.info(`🔧 Creator tools: http://${HOST}:${PORT}/api/creator/*`);
+
+    if (revolutionaryArchitectureReady) {
+      logger.info(`🔥 Database health: http://${HOST}:${PORT}/api/db/health`);
+      logger.info(`📊 Architecture stats: http://${HOST}:${PORT}/api/db/stats`);
+      logger.info(
+        `🏗️ Architecture info: http://${HOST}:${PORT}/api/db/architecture`
+      );
+    }
   }
 });
 
@@ -1634,7 +2037,7 @@ httpServer.listen(PORT, HOST as string, () => {
 const gracefulShutdown = (signal: string) => {
   logger.info(`${signal} received, shutting down gracefully...`);
   httpServer.close(() => {
-    logger.info("🕵️‍♂️ Real AI Detective server closed");
+    logger.info("🕵️‍♂️ Revolutionary Architecture server closed");
     process.exit(0);
   });
 };

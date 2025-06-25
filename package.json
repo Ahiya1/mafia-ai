@@ -13,8 +13,8 @@
     "server:dev": "tsx watch server/index.ts",
     "build": "next build",
     "build:server": "tsc --project tsconfig.server.json",
-    "start": "node dist/server/index.js",
-    "start:server": "node dist/server/index.js",
+    "start": "npm run db:migrate:safe && node dist/server/index.js",
+    "start:server": "npm run db:migrate:safe && node dist/server/index.js",
     "start:next": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
@@ -26,6 +26,7 @@
     "railway:start": "npm start",
     "__comment": "🔥 COMMIT 4: Revolutionary Architecture Database Scripts",
     "db:migrate": "tsx scripts/migrate-database.ts",
+    "db:migrate:safe": "tsx scripts/migrate-database.ts --check-only || tsx scripts/migrate-database.ts || echo 'Migration skipped - will retry at runtime'",
     "db:migrate:check": "tsx scripts/migrate-database.ts --check-only",
     "db:migrate:force": "tsx scripts/migrate-database.ts --force",
     "db:setup": "tsx scripts/migrate-database.ts --setup-admin",
@@ -35,9 +36,8 @@
     "dev:full": "concurrently \"npm run dev:next\" \"npm run dev:server\"",
     "test:db": "tsx scripts/migrate-database.ts --check-only",
     "test:architecture": "echo 'Testing Revolutionary Architecture...' && npm run test:db",
-    "__comment3": "Production Scripts",
-    "postinstall": "npm run db:migrate",
-    "vercel:deploy": "npm run db:migrate && npm run build"
+    "__comment3": "Production Scripts - FIXED for Docker",
+    "vercel:deploy": "npm run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
