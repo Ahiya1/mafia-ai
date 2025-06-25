@@ -559,7 +559,7 @@ app.get("/api/db/health", async (_req: Request, res: Response) => {
     const health = await databaseManager.checkHealth();
     const status = await databaseManager.getStatus();
 
-    res.json({
+    return res.json({
       connected: health.connected,
       revolutionaryArchitecture: health.revolutionaryArchitectureReady,
       tablesReady: health.tablesCreated,
@@ -570,7 +570,7 @@ app.get("/api/db/health", async (_req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error("Database health check error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       connected: false,
       error: "Health check failed",
       message: error instanceof Error ? error.message : String(error),
@@ -589,7 +589,7 @@ app.get("/api/db/stats", async (_req: Request, res: Response) => {
 
     const stats = await databaseManager.getArchitectureStats();
 
-    res.json({
+    return res.json({
       success: true,
       revolutionaryArchitecture: true,
       stats,
@@ -597,7 +597,7 @@ app.get("/api/db/stats", async (_req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error("Architecture stats error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Failed to get architecture stats",
       message: error instanceof Error ? error.message : String(error),
