@@ -536,6 +536,7 @@ export class NightManager extends EventEmitter {
   private hasNightAction(player: Player): boolean {
     return (
       player.role === PlayerRole.MAFIA_LEADER ||
+      player.role === PlayerRole.MAFIA_MEMBER ||
       player.role === PlayerRole.HEALER
     );
   }
