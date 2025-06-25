@@ -333,7 +333,9 @@ export class NightManager extends EventEmitter {
             `❌ INNER ERROR: Mafia coordination failed for ${mafiaPlayer.name}:`,
             error
           );
-          console.error(`❌ ERROR STACK:`, error.stack);
+          if (typeof error === "object" && error !== null && "stack" in error) {
+            console.error(`❌ ERROR STACK:`, (error as { stack?: any }).stack);
+          }
         }
 
         console.log(`🔴 STEP 10: Waiting between mafia messages`);
@@ -345,7 +347,16 @@ export class NightManager extends EventEmitter {
       console.log(`🔴 STEP 11: All mafia coordination completed successfully`);
     } catch (outerError) {
       console.error(`❌ OUTER ERROR in startMafiaCoordination:`, outerError);
-      console.error(`❌ OUTER ERROR STACK:`, outerError.stack);
+      if (
+        typeof outerError === "object" &&
+        outerError !== null &&
+        "stack" in outerError
+      ) {
+        console.error(
+          `❌ OUTER ERROR STACK:`,
+          (outerError as { stack?: any }).stack
+        );
+      }
     }
   }
 
