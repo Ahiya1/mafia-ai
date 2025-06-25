@@ -270,51 +270,82 @@ export class NightManager extends EventEmitter {
         .join(" and ")}`
     );
 
-    // Get available targets for mafia
-    const availableTargets = this.nightState!.alivePlayers.filter((id) => {
-      const player = this.players.get(id);
-      return (
-        player &&
-        player.role !== PlayerRole.MAFIA_LEADER &&
-        player.role !== PlayerRole.MAFIA_MEMBER
-      );
-    }).map((id) => nameRegistry.getName(id, this.gameId) || "Unknown");
-
-    // Generate mafia coordination for each mafia member
-    for (const mafiaPlayer of mafiaPlayers) {
-      try {
-        const context = aiContextBuilder.buildNightActionContext(
-          mafiaPlayer.id
+    try {
+      console.log(`🔴 STEP 1: Getting available targets`);
+      const availableTargets = this.nightState!.alivePlayers.filter((id) => {
+        const player = this.players.get(id);
+        return (
+          player &&
+          player.role !== PlayerRole.MAFIA_LEADER &&
+          player.role !== PlayerRole.MAFIA_MEMBER
         );
+      }).map((id) => nameRegistry.getName(id, this.gameId) || "Unknown");
 
-        const response = await contextManager.trigger(mafiaPlayer.id, {
-          type: "night_action",
-          data: {
-            your_name: mafiaPlayer.name,
-            your_role: mafiaPlayer.role,
-            phase: "mafia_coordination",
-            available_targets: availableTargets,
-            mafia_team: mafiaPlayers.map((p) => p.name),
-            round: this.nightState!.round,
-          },
-          requiresResponse: true,
-          timeoutMs: 10000,
-        });
+      console.log(
+        `🔴 STEP 2: Available targets: ${availableTargets.join(", ")}`
+      );
 
-        if (response.content) {
-          this.addMafiaChat(mafiaPlayer.id, response.content);
+      for (const mafiaPlayer of mafiaPlayers) {
+        try {
+          console.log(
+            `🔴 STEP 3: Starting coordination for ${mafiaPlayer.name}`
+          );
+
+          console.log(`🔴 STEP 4: Building context for ${mafiaPlayer.name}`);
+          const context = aiContextBuilder.buildNightActionContext(
+            mafiaPlayer.id
+          );
+          console.log(
+            `🔴 STEP 5: Context built successfully for ${mafiaPlayer.name}`
+          );
+
+          console.log(
+            `🔴 STEP 6: Calling contextManager.trigger for ${mafiaPlayer.name}`
+          );
+          const response = await contextManager.trigger(mafiaPlayer.id, {
+            type: "night_action",
+            data: {
+              your_name: mafiaPlayer.name,
+              your_role: mafiaPlayer.role,
+              phase: "mafia_coordination",
+              available_targets: availableTargets,
+              mafia_team: mafiaPlayers.map((p) => p.name),
+              round: this.nightState!.round,
+            },
+            requiresResponse: true,
+            timeoutMs: 10000,
+          });
+          console.log(
+            `🔴 STEP 7: Got response for ${
+              mafiaPlayer.name
+            }: ${response.content?.substring(0, 100)}`
+          );
+
+          if (response.content) {
+            console.log(`🔴 STEP 8: Adding mafia chat for ${mafiaPlayer.name}`);
+            this.addMafiaChat(mafiaPlayer.id, response.content);
+            console.log(
+              `🔴 STEP 9: Mafia chat added successfully for ${mafiaPlayer.name}`
+            );
+          }
+        } catch (error) {
+          console.error(
+            `❌ INNER ERROR: Mafia coordination failed for ${mafiaPlayer.name}:`,
+            error
+          );
+          console.error(`❌ ERROR STACK:`, error.stack);
         }
-      } catch (error) {
-        console.error(
-          `❌ Mafia coordination failed for ${mafiaPlayer.name}:`,
-          error
+
+        console.log(`🔴 STEP 10: Waiting between mafia messages`);
+        await new Promise((resolve) =>
+          setTimeout(resolve, 1000 + Math.random() * 2000)
         );
       }
 
-      // Delay between mafia messages
-      await new Promise((resolve) =>
-        setTimeout(resolve, 1000 + Math.random() * 2000)
-      );
+      console.log(`🔴 STEP 11: All mafia coordination completed successfully`);
+    } catch (outerError) {
+      console.error(`❌ OUTER ERROR in startMafiaCoordination:`, outerError);
+      console.error(`❌ OUTER ERROR STACK:`, outerError.stack);
     }
   }
 
