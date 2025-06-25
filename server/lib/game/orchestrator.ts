@@ -1356,7 +1356,7 @@ export class GameOrchestrator
     return {
       contextManager: contextManager.getContextStats(),
       aiCoordination:
-        require("../ai/ai-coordinator").aiCoordinator.getCoordinationStats(),
+        require("./ai/ai-coordinator").aiCoordinator.getCoordinationStats(),
       personalitiesAssigned: Array.from(this.gameState.players.values()).filter(
         (p) => p.type === PlayerType.AI
       ).length,
