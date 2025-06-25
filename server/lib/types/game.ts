@@ -1,4 +1,4 @@
-// server/types/game.ts - Core game types for AI Mafia
+// server/lib/types/game.ts - Enhanced with new architecture types
 export type PlayerId = string;
 export type RoomId = string;
 export type GameId = string;
@@ -125,25 +125,111 @@ export interface GameEvent {
   round: number;
 }
 
-export interface Room {
-  id: RoomId;
-  name: string;
-  code: string; // 6-digit room code
-  hostId: PlayerId;
-  players: PlayerId[];
-  maxPlayers: number;
-  isPrivate: boolean;
-  gameState?: GameState;
-  createdAt: Date;
-  settings: RoomSettings;
+// 🆕 NEW: Context Operation Types for Revolutionary Architecture
+export interface ContextOperation {
+  operationType: "trigger" | "update" | "push";
+  targetPlayerId?: PlayerId; // undefined for push operations
+  timestamp: Date;
 }
 
-export interface RoomSettings {
-  allowSpectators: boolean;
-  premiumModelsOnly: boolean;
-  customAICount?: number;
-  timeMultiplier: number; // For shorter/longer games
-  difficulty: "easy" | "normal" | "hard";
+export interface TemporaryContext extends ContextOperation {
+  operationType: "trigger";
+  targetPlayerId: PlayerId;
+  contextType: "discussion_turn" | "voting_turn" | "night_action";
+  data: any;
+  requiresResponse: boolean;
+  timeoutMs?: number;
+}
+
+export interface PersistentContext extends ContextOperation {
+  operationType: "update";
+  targetPlayerId: PlayerId;
+  contextType: "role_assignment" | "player_status" | "game_state";
+  data: any;
+}
+
+export interface BroadcastContext extends ContextOperation {
+  operationType: "push";
+  contextType:
+    | "phase_change"
+    | "elimination_result"
+    | "full_discussion"
+    | "game_end";
+  data: any;
+  targetedPlayers?: PlayerId[]; // if undefined, broadcasts to all
+}
+
+// 🆕 NEW: Name Registry Types
+export interface NameMapping {
+  gameId: GameId;
+  realName: string;
+  realId: PlayerId;
+  gameName: string;
+  playerType: PlayerType;
+  assignedAt: Date;
+}
+
+export interface NameRegistryStats {
+  totalMappings: number;
+  humanMappings: number;
+  aiMappings: number;
+  gamesActive: number;
+}
+
+// 🆕 NEW: Orchestrator Interface (matches current engine API)
+export interface GameOrchestratorInterface {
+  // Core game management
+  addPlayer(player: Player): boolean;
+  removePlayer(playerId: PlayerId): boolean;
+  startGame(): boolean;
+
+  // Player actions
+  sendMessage(playerId: PlayerId, content: string): boolean;
+  castVote(playerId: PlayerId, targetId: PlayerId, reasoning: string): boolean;
+  nightAction(
+    playerId: PlayerId,
+    action: "kill" | "heal",
+    targetId?: PlayerId
+  ): boolean;
+
+  // State access
+  getGameState(): GameState;
+  getPlayerRole(playerId: PlayerId): PlayerRole | undefined;
+  isPlayerAlive(playerId: PlayerId): boolean;
+  getCurrentPhase(): GamePhase;
+  getAlivePlayers(): Player[];
+
+  // Admin controls
+  forcePhaseChange(phase: GamePhase): boolean;
+  setPlayerReady(playerId: PlayerId, ready: boolean): boolean;
+
+  // Lifecycle
+  cleanup(): void;
+}
+
+// 🆕 NEW: Response Parsing Types
+export interface ParsedResponse {
+  isValid: boolean;
+  responseType: "discussion" | "voting" | "night_action";
+  data: any;
+  errors: string[];
+  parsingMethod: string;
+  confidence: number;
+}
+
+export interface DiscussionResponse {
+  message: string;
+}
+
+export interface VotingResponse {
+  message: string;
+  vote_target: string;
+}
+
+export interface NightActionResponse {
+  action: "kill" | "heal";
+  target: string;
+  reasoning: string;
 }
 
 // Game action types that can be sent through WebSocket
@@ -183,40 +269,4 @@ export interface WinCondition {
   winner?: "citizens" | "mafia";
   reason: string;
   isGameOver: boolean;
-}
-
-// Analytics and Research Data Types
-export interface PlayerBehaviorData {
-  playerId: PlayerId;
-  gameId: GameId;
-  aiDetectionAccuracy: number;
-  votingPatterns: VotingPattern[];
-  communicationStyle: CommunicationAnalysis;
-  trustNetworkPosition: number;
-  strategicDecisions: StrategicDecision[];
-}
-
-export interface VotingPattern {
-  round: number;
-  targetId: PlayerId;
-  reasoning: string;
-  followedCrowd: boolean;
-  changedVote: boolean;
-  confidenceLevel: number;
-}
-
-export interface CommunicationAnalysis {
-  averageMessageLength: number;
-  sentimentScore: number;
-  aggressionLevel: number;
-  leadershipIndicators: number;
-  responseLatency: number[];
-}
-
-export interface StrategicDecision {
-  round: number;
-  phase: GamePhase;
-  decision: string;
-  outcome: "positive" | "negative" | "neutral";
-  riskLevel: number;
 }

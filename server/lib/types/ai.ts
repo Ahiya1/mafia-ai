@@ -1,96 +1,10 @@
-// AI Model and Personality Types for AI Mafia - Complete Implementation with Missing Types
-import { PlayerId, PlayerRole, GamePhase, AIModel } from "./game";
+// server/lib/types/ai.ts - Enhanced with Context Operations
+import { PlayerRole, GamePhase, PlayerId } from "./game";
 
-// Export AIModel enum from game types for use in other modules
+// Re-export AIModel from game types
 export { AIModel } from "./game";
 
-export interface AIPersonality {
-  model: AIModel;
-  name: string;
-  description: string;
-  archetype: "analytical_detective" | "creative_storyteller" | "direct_analyst";
-  communicationStyle: CommunicationStyle;
-  strategicApproach: StrategicApproach;
-  suspicionLevel: number; // 1-10
-  trustLevel: number; // 1-10
-  aggressiveness: number; // 1-10
-}
-
-export interface CommunicationStyle {
-  averageMessageLength: "short" | "medium" | "long";
-  formalityLevel: "casual" | "formal" | "mixed";
-  emotionalExpression: "low" | "medium" | "high";
-  questionFrequency: "low" | "medium" | "high";
-  storytellingTendency: "low" | "medium" | "high";
-  logicalReasoning: "low" | "medium" | "high";
-}
-
-export interface StrategicApproach {
-  votesTiming: "early" | "middle" | "late" | "varies";
-  allianceBuilding: "aggressive" | "cautious" | "opportunistic";
-  informationSharing: "open" | "selective" | "secretive";
-  riskTolerance: "conservative" | "moderate" | "aggressive";
-  deceptionStyle?: "subtle" | "bold" | "misdirection"; // Only for mafia
-}
-
-export interface AIModelConfig {
-  model: AIModel;
-  tier: "free" | "premium";
-  provider: "openai" | "anthropic" | "google";
-  modelName: string;
-  costPerInputToken: number; // in dollars per million tokens
-  costPerOutputToken: number; // in dollars per million tokens
-  maxTokensPerRequest: number;
-  supportsStreaming: boolean;
-  responseTimeTarget: number; // milliseconds
-}
-
-export interface AIPromptTemplate {
-  system: string;
-  roleSpecific: Record<PlayerRole, string>;
-  phaseSpecific: Record<GamePhase, string>;
-  personalityModifiers: Record<string, string>;
-}
-
-export interface AIResponse {
-  content: string;
-  confidence: number;
-  reasoning?: string;
-  metadata: {
-    model: AIModel;
-    tokensUsed: number;
-    responseTime: number;
-    cost: number;
-    timestamp: Date;
-  };
-}
-
-// 🔧 FIXED: Add missing PlayerStatus interface
-export interface PlayerStatus {
-  living: Array<{
-    id: PlayerId;
-    name: string;
-    role?: PlayerRole;
-  }>;
-  eliminated: Array<{
-    id: PlayerId;
-    name: string;
-    role: PlayerRole;
-  }>;
-}
-
-// 🔧 FIXED: Add missing EliminationEvent interface
-export interface EliminationEvent {
-  round: number;
-  playerName: string;
-  playerId: PlayerId;
-  role: PlayerRole;
-  cause: "voted_out" | "mafia_kill";
-  voteCount?: number;
-  timestamp: Date;
-}
-
-// 🔧 FIXED: Add missing properties to AIDecisionContext
+// 🆕 NEW: Context Operation Types for AI Coordination
 export interface AIDecisionContext {
   playerId: PlayerId;
   role: PlayerRole;
@@ -103,11 +17,32 @@ export interface AIDecisionContext {
   timeRemaining: number;
   suspicionLevels: Record<PlayerId, number>;
   trustLevels: Record<PlayerId, number>;
+  playerStatus?: any;
+  eliminationHistory?: any;
+}
 
-  // 🔧 FIXED: Add the missing optional properties
-  playerStatus?: PlayerStatus;
-  latestElimination?: EliminationEvent;
-  eliminationHistory?: EliminationEvent[];
+export interface AIPersonality {
+  model: AIModel;
+  name: string;
+  description: string;
+  archetype: "analytical_detective" | "creative_storyteller" | "direct_analyst";
+  communicationStyle: {
+    averageMessageLength: "short" | "medium" | "long";
+    formalityLevel: "casual" | "mixed" | "formal";
+    emotionalExpression: "low" | "medium" | "high";
+    questionFrequency: "low" | "medium" | "high";
+    storytellingTendency: "low" | "medium" | "high";
+    logicalReasoning: "low" | "medium" | "high";
+  };
+  strategicApproach: {
+    votesTiming: "early" | "middle" | "late" | "varies";
+    allianceBuilding: "cautious" | "opportunistic" | "aggressive";
+    informationSharing: "secretive" | "selective" | "open";
+    riskTolerance: "conservative" | "moderate" | "aggressive";
+  };
+  suspicionLevel: number; // 1-10
+  trustLevel: number; // 1-10
+  aggressiveness: number; // 1-10
 }
 
 export interface AIActionRequest {
@@ -116,34 +51,25 @@ export interface AIActionRequest {
   personality: AIPersonality;
   constraints: {
     maxLength?: number;
+    timeLimit?: number;
     mustVote?: boolean;
     availableTargets?: PlayerId[];
-    timeLimit?: number;
   };
 }
 
-export interface MafiaCoordinationContext {
-  partnerRole: PlayerRole;
-  partnerId: PlayerId;
-  partnerPersonality: AIPersonality;
-  discussionHistory: string[];
-  targetOptions: PlayerId[];
-  riskAssessment: {
-    suspicionLevels: Record<PlayerId, number>;
-    safestTargets: PlayerId[];
-    riskyTargets: PlayerId[];
+export interface AIResponse {
+  content: string;
+  confidence: number;
+  metadata: {
+    model: AIModel;
+    tokensUsed: number;
+    responseTime: number;
+    cost: number;
+    timestamp: Date;
   };
 }
 
-export interface HealerDecisionContext {
-  previousProtections: PlayerId[];
-  threatAssessment: Record<PlayerId, number>;
-  publiclySuspicious: PlayerId[];
-  likelyTargets: PlayerId[];
-  selfPreservationRisk: number;
-}
-
-// Cost tracking and optimization
+// 🆕 NEW: API Usage Stats interface
 export interface APIUsageStats {
   model: AIModel;
   totalRequests: number;
@@ -155,303 +81,214 @@ export interface APIUsageStats {
   lastUsed: Date;
 }
 
-export interface CostOptimizationConfig {
-  maxCostPerGame: number;
-  preferredModelsForFreeUsers: AIModel[];
-  fallbackModel: AIModel;
-  enableResponseCaching: boolean;
-  maxCacheAge: number; // minutes
-  rateLimitPerModel: number; // requests per minute
+// 🆕 NEW: Context Manager Interface
+export interface ContextManagerInterface {
+  // Core context operations
+  trigger(
+    playerId: PlayerId,
+    context: TemporaryContextData
+  ): Promise<AIResponse>;
+  update(playerId: PlayerId, context: PersistentContextData): void;
+  push(context: BroadcastContextData): void;
+
+  // Context building
+  buildPlayerContext(playerId: PlayerId): AIDecisionContext;
+
+  // State management
+  isPlayerContextReady(playerId: PlayerId): boolean;
+  clearPlayerContext(playerId: PlayerId): void;
+
+  // Analytics
+  getContextStats(): ContextStats;
 }
 
-// Complete AI Personality definitions for all 6 models
-export const AI_PERSONALITIES: Record<AIModel, AIPersonality> = {
-  // Premium Models
+export interface TemporaryContextData {
+  type: "discussion_turn" | "voting_turn" | "night_action";
+  data: any;
+  requiresResponse: boolean;
+  timeoutMs?: number;
+}
+
+export interface PersistentContextData {
+  type: "role_assignment" | "player_status" | "game_state";
+  data: any;
+}
+
+export interface BroadcastContextData {
+  type: "phase_change" | "elimination_result" | "full_discussion" | "game_end";
+  data: any;
+  targetedPlayers?: PlayerId[];
+}
+
+export interface ContextStats {
+  totalTriggers: number;
+  totalUpdates: number;
+  totalPushes: number;
+  averageResponseTime: number;
+  activeContexts: number;
+  errorRate: number;
+}
+
+// 🆕 NEW: Name Registry Interface
+export interface NameRegistryInterface {
+  // Core name mapping
+  registerPlayer(name: string, id: PlayerId, gameId: string): void;
+  getId(name: string, gameId: string): PlayerId | null;
+  getName(id: PlayerId, gameId: string): string | null;
+
+  // Validation
+  isNameRegistered(name: string, gameId: string): boolean;
+  isIdRegistered(id: PlayerId, gameId: string): boolean;
+
+  // Game management
+  createGameMapping(gameId: string): void;
+  clearGameMapping(gameId: string): void;
+
+  // Analytics
+  getRegistryStats(): any;
+}
+
+// 🆕 NEW: Response Parser Interface
+export interface ResponseParserInterface {
+  // Core parsing
+  parseResponse(
+    response: string,
+    expectedType: "discussion" | "voting" | "night_action",
+    availableTargets: string[]
+  ): ParsedAIResponse;
+
+  // Validation
+  validateDiscussionResponse(response: any): ValidationResult;
+  validateVotingResponse(
+    response: any,
+    availableTargets: string[]
+  ): ValidationResult;
+  validateNightActionResponse(
+    response: any,
+    availableTargets: string[]
+  ): ValidationResult;
+
+  // Fallback generation
+  generateFallbackResponse(
+    type: "discussion" | "voting" | "night_action",
+    personality: AIPersonality,
+    availableTargets: string[]
+  ): ParsedAIResponse;
+}
+
+export interface ParsedAIResponse {
+  isValid: boolean;
+  responseType: "discussion" | "voting" | "night_action";
+  data: DiscussionResponseData | VotingResponseData | NightActionResponseData;
+  errors: string[];
+  parsingMethod:
+    | "json"
+    | "cleaned_json"
+    | "pattern"
+    | "content_analysis"
+    | "fallback"
+    | "emergency"
+    | string;
+  confidence: number;
+}
+
+export interface DiscussionResponseData {
+  message: string;
+}
+
+export interface VotingResponseData {
+  message: string;
+  vote_target: string;
+}
+
+export interface NightActionResponseData {
+  action: "kill" | "heal";
+  target: string;
+  reasoning: string;
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+// 🆕 NEW: AI Context Builder Interface
+export interface AIContextBuilderInterface {
+  // Context building
+  buildDiscussionContext(playerId: PlayerId): AIDecisionContext;
+  buildVotingContext(playerId: PlayerId): AIDecisionContext;
+  buildNightActionContext(playerId: PlayerId): AIDecisionContext;
+
+  // Context enhancement
+  enhanceWithGameHistory(context: AIDecisionContext): AIDecisionContext;
+  enhanceWithSuspicionData(context: AIDecisionContext): AIDecisionContext;
+  enhanceWithPlayerStatus(context: AIDecisionContext): AIDecisionContext;
+
+  // Context validation
+  validateContext(context: AIDecisionContext): ValidationResult;
+
+  // Context analytics
+  getContextBuildingStats(): any;
+}
+
+// AI Model Configuration
+export const MODEL_CONFIGS: Record<AIModel, ModelConfig> = {
   [AIModel.CLAUDE_SONNET_4]: {
-    model: AIModel.CLAUDE_SONNET_4,
-    name: "Detective Chen",
-    description: "Methodical analyst who builds logical cases step by step",
-    archetype: "analytical_detective",
-    communicationStyle: {
-      averageMessageLength: "long",
-      formalityLevel: "formal",
-      emotionalExpression: "low",
-      questionFrequency: "high",
-      storytellingTendency: "low",
-      logicalReasoning: "high",
-    },
-    strategicApproach: {
-      votesTiming: "late",
-      allianceBuilding: "cautious",
-      informationSharing: "selective",
-      riskTolerance: "conservative",
-    },
-    suspicionLevel: 8,
-    trustLevel: 6,
-    aggressiveness: 4,
-  },
-
-  [AIModel.GPT_4O]: {
-    model: AIModel.GPT_4O,
-    name: "Riley the Storyteller",
-    description:
-      "Creative communicator who builds elaborate theories and connections",
-    archetype: "creative_storyteller",
-    communicationStyle: {
-      averageMessageLength: "long",
-      formalityLevel: "casual",
-      emotionalExpression: "high",
-      questionFrequency: "medium",
-      storytellingTendency: "high",
-      logicalReasoning: "medium",
-    },
-    strategicApproach: {
-      votesTiming: "varies",
-      allianceBuilding: "aggressive",
-      informationSharing: "open",
-      riskTolerance: "moderate",
-    },
-    suspicionLevel: 5,
-    trustLevel: 8,
-    aggressiveness: 6,
-  },
-
-  [AIModel.GEMINI_2_5_PRO]: {
-    model: AIModel.GEMINI_2_5_PRO,
-    name: "Alex Sharp",
-    description:
-      "Direct analyst who cuts through noise with efficient observations",
-    archetype: "direct_analyst",
-    communicationStyle: {
-      averageMessageLength: "medium",
-      formalityLevel: "mixed",
-      emotionalExpression: "medium",
-      questionFrequency: "medium",
-      storytellingTendency: "low",
-      logicalReasoning: "high",
-    },
-    strategicApproach: {
-      votesTiming: "varies",
-      allianceBuilding: "opportunistic",
-      informationSharing: "selective",
-      riskTolerance: "moderate",
-    },
-    suspicionLevel: 7,
-    trustLevel: 6,
-    aggressiveness: 6,
-  },
-
-  // Free Tier Models
-  [AIModel.CLAUDE_HAIKU]: {
-    model: AIModel.CLAUDE_HAIKU,
-    name: "Sam Logic",
-    description: "Analytical thinker with concise observations",
-    archetype: "analytical_detective",
-    communicationStyle: {
-      averageMessageLength: "short",
-      formalityLevel: "formal",
-      emotionalExpression: "low",
-      questionFrequency: "medium",
-      storytellingTendency: "low",
-      logicalReasoning: "high",
-    },
-    strategicApproach: {
-      votesTiming: "late",
-      allianceBuilding: "cautious",
-      informationSharing: "selective",
-      riskTolerance: "conservative",
-    },
-    suspicionLevel: 7,
-    trustLevel: 6,
-    aggressiveness: 3,
-  },
-
-  [AIModel.GPT_4O_MINI]: {
-    model: AIModel.GPT_4O_MINI,
-    name: "Jordan Quick",
-    description: "Fast-thinking creative with intuitive insights",
-    archetype: "creative_storyteller",
-    communicationStyle: {
-      averageMessageLength: "medium",
-      formalityLevel: "casual",
-      emotionalExpression: "medium",
-      questionFrequency: "medium",
-      storytellingTendency: "medium",
-      logicalReasoning: "medium",
-    },
-    strategicApproach: {
-      votesTiming: "middle",
-      allianceBuilding: "aggressive",
-      informationSharing: "open",
-      riskTolerance: "moderate",
-    },
-    suspicionLevel: 5,
-    trustLevel: 7,
-    aggressiveness: 5,
-  },
-
-  [AIModel.GEMINI_2_5_FLASH]: {
-    model: AIModel.GEMINI_2_5_FLASH,
-    name: "Casey Direct",
-    description: "No-nonsense analyzer with quick, clear insights",
-    archetype: "direct_analyst",
-    communicationStyle: {
-      averageMessageLength: "short",
-      formalityLevel: "casual",
-      emotionalExpression: "low",
-      questionFrequency: "low",
-      storytellingTendency: "low",
-      logicalReasoning: "medium",
-    },
-    strategicApproach: {
-      votesTiming: "early",
-      allianceBuilding: "opportunistic",
-      informationSharing: "selective",
-      riskTolerance: "moderate",
-    },
-    suspicionLevel: 7,
-    trustLevel: 5,
-    aggressiveness: 6,
-  },
-};
-
-export const MODEL_CONFIGS: Record<AIModel, AIModelConfig> = {
-  [AIModel.CLAUDE_SONNET_4]: {
-    model: AIModel.CLAUDE_SONNET_4,
-    tier: "premium",
     provider: "anthropic",
-    modelName: "claude-sonnet-4-20250514",
-    costPerInputToken: 3.0,
-    costPerOutputToken: 15.0,
-    maxTokensPerRequest: 4096,
-    supportsStreaming: true,
-    responseTimeTarget: 3000,
-  },
-  [AIModel.GPT_4O]: {
-    model: AIModel.GPT_4O,
+    modelName: "claude-3-5-sonnet-20241022",
+    maxTokensPerRequest: 1000,
+    costPerInputToken: 0.003,
+    costPerOutputToken: 0.015,
     tier: "premium",
-    provider: "openai",
-    modelName: "gpt-4o",
-    costPerInputToken: 2.5,
-    costPerOutputToken: 10.0,
-    maxTokensPerRequest: 4096,
-    supportsStreaming: true,
-    responseTimeTarget: 2500,
-  },
-  [AIModel.GEMINI_2_5_PRO]: {
-    model: AIModel.GEMINI_2_5_PRO,
-    tier: "premium",
-    provider: "google",
-    modelName: "gemini-2.5-pro",
-    costPerInputToken: 1.25,
-    costPerOutputToken: 10.0,
-    maxTokensPerRequest: 4096,
-    supportsStreaming: true,
-    responseTimeTarget: 2000,
   },
   [AIModel.CLAUDE_HAIKU]: {
-    model: AIModel.CLAUDE_HAIKU,
-    tier: "free",
     provider: "anthropic",
     modelName: "claude-3-5-haiku-20241022",
-    costPerInputToken: 0.25,
-    costPerOutputToken: 1.25,
-    maxTokensPerRequest: 2048,
-    supportsStreaming: false,
-    responseTimeTarget: 1500,
+    maxTokensPerRequest: 500,
+    costPerInputToken: 0.00025,
+    costPerOutputToken: 0.00125,
+    tier: "free",
+  },
+  [AIModel.GPT_4O]: {
+    provider: "openai",
+    modelName: "gpt-4o",
+    maxTokensPerRequest: 1000,
+    costPerInputToken: 0.0025,
+    costPerOutputToken: 0.01,
+    tier: "premium",
   },
   [AIModel.GPT_4O_MINI]: {
-    model: AIModel.GPT_4O_MINI,
-    tier: "free",
     provider: "openai",
     modelName: "gpt-4o-mini",
-    costPerInputToken: 0.15,
-    costPerOutputToken: 0.6,
-    maxTokensPerRequest: 2048,
-    supportsStreaming: false,
-    responseTimeTarget: 1000,
+    maxTokensPerRequest: 500,
+    costPerInputToken: 0.00015,
+    costPerOutputToken: 0.0006,
+    tier: "free",
+  },
+  [AIModel.GEMINI_2_5_PRO]: {
+    provider: "google",
+    modelName: "gemini-2.5-pro",
+    maxTokensPerRequest: 1000,
+    costPerInputToken: 0.00125,
+    costPerOutputToken: 0.005,
+    tier: "premium",
   },
   [AIModel.GEMINI_2_5_FLASH]: {
-    model: AIModel.GEMINI_2_5_FLASH,
-    tier: "free",
     provider: "google",
-    modelName: "models/gemini-2.5-flash",
-    costPerInputToken: 0.075,
-    costPerOutputToken: 0.3,
-    maxTokensPerRequest: 2048,
-    supportsStreaming: false,
-    responseTimeTarget: 800,
+    modelName: "gemini-2.5-flash",
+    maxTokensPerRequest: 500,
+    costPerInputToken: 0.000075,
+    costPerOutputToken: 0.0003,
+    tier: "free",
   },
 };
 
-// Utility functions for AI personality management
-export function getPersonalityByModel(model: AIModel): AIPersonality {
-  return AI_PERSONALITIES[model];
+export interface ModelConfig {
+  provider: "openai" | "anthropic" | "google";
+  modelName: string;
+  maxTokensPerRequest: number;
+  costPerInputToken: number;
+  costPerOutputToken: number;
+  tier: "free" | "premium";
 }
-
-export function getRandomPersonalityForTier(
-  premiumEnabled: boolean = false
-): AIPersonality {
-  const availableModels = premiumEnabled
-    ? Object.values(AIModel)
-    : [AIModel.CLAUDE_HAIKU, AIModel.GPT_4O_MINI, AIModel.GEMINI_2_5_FLASH];
-
-  const randomModel =
-    availableModels[Math.floor(Math.random() * availableModels.length)];
-  return AI_PERSONALITIES[randomModel];
-}
-
-export function getPersonalitiesByArchetype(
-  archetype: AIPersonality["archetype"]
-): AIPersonality[] {
-  return Object.values(AI_PERSONALITIES).filter(
-    (p) => p.archetype === archetype
-  );
-}
-
-export function getModelsByTier(tier: "free" | "premium"): AIModel[] {
-  return Object.values(AIModel).filter(
-    (model) => MODEL_CONFIGS[model].tier === tier
-  );
-}
-
-export function calculateEstimatedCost(
-  model: AIModel,
-  inputTokens: number,
-  outputTokens: number
-): number {
-  const config = MODEL_CONFIGS[model];
-  const inputCost = (inputTokens / 1000000) * config.costPerInputToken;
-  const outputCost = (outputTokens / 1000000) * config.costPerOutputToken;
-  return inputCost + outputCost;
-}
-
-// Default prompt templates for different game phases
-export const DEFAULT_PROMPT_TEMPLATES: Record<GamePhase, string> = {
-  [GamePhase.WAITING]: "The game is starting soon. Get ready to play!",
-  [GamePhase.ROLE_ASSIGNMENT]:
-    "You have been assigned your role. Remember your objectives.",
-  [GamePhase.NIGHT]:
-    "It's nighttime. Special roles can now take their actions.",
-  [GamePhase.REVELATION]: "The results of the night are being revealed.",
-  [GamePhase.DISCUSSION]:
-    "Time for discussion. Share your thoughts and suspicions.",
-  [GamePhase.VOTING]:
-    "Time to vote. Choose carefully who you think should be eliminated.",
-  [GamePhase.GAME_OVER]: "The game has ended. Thanks for playing!",
-};
-
-// Role-specific instruction templates
-export const ROLE_INSTRUCTIONS: Record<PlayerRole, string> = {
-  [PlayerRole.MAFIA_LEADER]:
-    "You are the Mafia Leader. Your goal is to eliminate citizens until mafia equals citizen numbers. During night phases, you choose who to eliminate. Work with your mafia partner and stay hidden during discussions.",
-
-  [PlayerRole.MAFIA_MEMBER]:
-    "You are a Mafia Member. Support your Mafia Leader and help choose targets. During discussions, deflect suspicion and help your team achieve victory.",
-
-  [PlayerRole.HEALER]:
-    "You are the Healer. Each night, you can protect one player from elimination. Use this power strategically to save important players and help the citizens win.",
-
-  [PlayerRole.CITIZEN]:
-    "You are a Citizen. Use discussion and voting to identify and eliminate the mafia members. Pay attention to behavior patterns and voting history.",
-};
