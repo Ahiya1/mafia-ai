@@ -1,4 +1,4 @@
-# Simplified Dockerfile for AI Mafia
+# Simplified Dockerfile for AI Mafia - FIXED
 FROM node:20-alpine AS base
 
 # Install dependencies
@@ -29,6 +29,10 @@ RUN adduser --system --uid 1001 nextjs
 # Copy built server
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
+# FIX: Copy the scripts directory for migrations
+COPY --from=builder /app/scripts ./scripts
+# Also copy server source for migration dependencies
+COPY --from=builder /app/server ./server
 
 # Install production dependencies
 RUN npm ci --only=production && npm cache clean --force
