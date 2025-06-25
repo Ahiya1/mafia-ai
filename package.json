@@ -1,7 +1,7 @@
 {
   "name": "mafia-ai",
   "version": "2.0.0",
-  "description": "AI Mafia - A groundbreaking social deduction game with AI personalities",
+  "description": "AI Mafia - A groundbreaking social deduction game with Revolutionary Architecture",
   "private": true,
   "engines": {
     "node": ">=20.0.0"
@@ -20,12 +20,24 @@
     "type-check": "tsc --noEmit",
     "test:server": "chmod +x test-server.sh && ./test-server.sh",
     "setup": "chmod +x start-dev.sh && ./start-dev.sh",
-    "migrate": "node scripts/migrate.js",
-    "seed": "node scripts/seed.js",
     "deploy": "npm run build && npm run build:server",
     "postbuild": "echo 'Build completed successfully'",
     "railway:build": "npm run build",
-    "railway:start": "npm start"
+    "railway:start": "npm start",
+    "__comment": "🔥 COMMIT 4: Revolutionary Architecture Database Scripts",
+    "db:migrate": "tsx scripts/migrate-database.ts",
+    "db:migrate:check": "tsx scripts/migrate-database.ts --check-only",
+    "db:migrate:force": "tsx scripts/migrate-database.ts --force",
+    "db:setup": "tsx scripts/migrate-database.ts --setup-admin",
+    "db:health": "tsx scripts/migrate-database.ts --check-only",
+    "db:stats": "tsx scripts/migrate-database.ts --check-only --verbose",
+    "__comment2": "Development and Testing",
+    "dev:full": "concurrently \"npm run dev:next\" \"npm run dev:server\"",
+    "test:db": "tsx scripts/migrate-database.ts --check-only",
+    "test:architecture": "echo 'Testing Revolutionary Architecture...' && npm run test:db",
+    "__comment3": "Production Scripts",
+    "postinstall": "npm run db:migrate",
+    "vercel:deploy": "npm run db:migrate && npm run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
